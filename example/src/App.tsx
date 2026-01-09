@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Worker, WorkerPool } from 'react-native-webworker';
 import { ParallelDemo } from './screens/ParallelDemo';
@@ -344,6 +345,44 @@ const App = () => {
     }
   };
 
+  // Example 6: Timeout worker
+  const runTimeoutWorker = async () => {
+    addLog('Creating timeout worker...');
+    setLoading(true);
+
+    try {
+      const worker = new Worker({
+        script: `
+          self.onmessage = function(event) {
+            setTimeout(() => {
+              self.postMessage({ message: 'Timeout completed after 5 seconds!' });
+            }, 5000);
+          };
+        `,
+        name: 'timeout-worker',
+      });
+
+      worker.onmessage = async (event) => {
+        const data = event.data as { message: string };
+        addLog(`Worker message: ${data.message}`, 'success');
+
+        // Show alert
+        Alert.alert('Worker Timeout', data.message);
+
+        // Terminate worker
+        await worker.terminate();
+        addLog('Timeout worker terminated');
+        setLoading(false);
+      };
+
+      // Start the timeout
+      await worker.postMessage({ action: 'start' });
+    } catch (error) {
+      addLog(`Error: ${(error as Error).message}`, 'error');
+      setLoading(false);
+    }
+  };
+
   const clearLogs = () => {
     setLogs([]);
   };
@@ -409,6 +448,14 @@ const App = () => {
           disabled={loading}
         >
           <Text style={styles.buttonText}>5. String Processing</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.button}
+          onPress={runTimeoutWorker}
+          disabled={loading}
+        >
+          <Text style={styles.buttonText}>6. Timeout Worker</Text>
         </TouchableOpacity>
 
         <TouchableOpacity

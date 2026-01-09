@@ -164,6 +164,7 @@ void WorkerRuntime::workerThreadMain() {
 
         setupGlobalScope();
         installNativeFunctions();
+        installTimerFunctions();
 
         running_ = true;
         initialized_ = true;
@@ -187,6 +188,11 @@ void WorkerRuntime::workerThreadMain() {
                         std::make_shared<StringBuffer>(pendingScript_),
                         "worker-script.js"
                     );
+
+                    // Drain microtasks after script execution
+                    static_cast<facebook::hermes::HermesRuntime*>(hermesRuntime_.get())
+                        ->drainMicrotasks();
+
                     scriptExecuted_ = true;
                 } catch (const JSError& e) {
                     if (errorCallback_) {
@@ -204,11 +210,8 @@ void WorkerRuntime::workerThreadMain() {
         }
         pendingScriptCondition_.notify_all();
 
-        // Main message loop
-        while (running_.load()) {
-            processMessageQueue();
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
+        // Run the event loop
+        eventLoop();
 
     } catch (const std::exception& e) {
         if (errorCallback_) {
@@ -218,40 +221,63 @@ void WorkerRuntime::workerThreadMain() {
     }
 }
 
-void WorkerRuntime::processMessageQueue() {
-    std::string message;
+void WorkerRuntime::eventLoop() {
+    while (running_.load() && !closeRequested_.load()) {
+        // Calculate wait time (until next timer or max wait)
+        auto waitTime = taskQueue_.timeUntilNext();
 
-    {
-        std::lock_guard<std::mutex> lock(queueMutex_);
-        if (messageQueue_.empty()) {
-            return;
+        // Cap wait time to avoid very long waits
+        if (waitTime > std::chrono::milliseconds(1000)) {
+            waitTime = std::chrono::milliseconds(1000);
         }
-        message = std::move(messageQueue_.front());
-        messageQueue_.pop();
-    }
 
+        // Wait for and dequeue next task
+        auto task = taskQueue_.dequeue(waitTime);
+
+        if (!task.has_value()) {
+            continue;  // Timeout or spurious wake, continue loop
+        }
+
+        if (task->cancelled) {
+            continue;  // Task was cancelled, skip it
+        }
+
+        // Check if this timer was cancelled
+        if (task->type == TaskType::Timer) {
+            std::lock_guard<std::mutex> lock(cancelledTimersMutex_);
+            if (cancelledTimers_.count(task->id) > 0) {
+                continue;  // Timer was cancelled
+            }
+        }
+
+        // Execute the macrotask
+        processTask(*task);
+    }
+}
+
+void WorkerRuntime::processTask(Task& task) {
     if (!hermesRuntime_ || !running_.load()) {
         return;
     }
 
     try {
         std::lock_guard<std::mutex> lock(runtimeMutex_);
-        Runtime& runtime = *hermesRuntime_;
 
-        auto handleMessageProp = runtime.global().getProperty(runtime, "__handleMessage");
+        // Execute the task
+        task.execute();
 
-        if (handleMessageProp.isObject() && handleMessageProp.asObject(runtime).isFunction(runtime)) {
-            auto handleMessage = handleMessageProp.asObject(runtime).asFunction(runtime);
-            handleMessage.call(runtime, String::createFromUtf8(runtime, message));
-        }
+        // Drain microtasks after each macrotask (HTML spec requirement)
+        // This processes all Promise callbacks, queueMicrotask, etc.
+        static_cast<facebook::hermes::HermesRuntime*>(hermesRuntime_.get())
+            ->drainMicrotasks();
 
     } catch (const JSError& e) {
         if (errorCallback_) {
-            errorCallback_(workerId_, "JSError in message handler: " + e.getMessage());
+            errorCallback_(workerId_, "JSError in task: " + e.getMessage());
         }
     } catch (const std::exception& e) {
         if (errorCallback_) {
-            errorCallback_(workerId_, "Exception in message handler: " + std::string(e.what()));
+            errorCallback_(workerId_, "Exception in task: " + std::string(e.what()));
         }
     }
 }
@@ -361,43 +387,16 @@ void WorkerRuntime::setupGlobalScope() {
 
             self.console = console;
 
-            // setTimeout/clearTimeout basic implementation
-            var __timers = {};
-            var __timerIdCounter = 1;
-
-            self.setTimeout = function(callback, delay) {
-                var timerId = __timerIdCounter++;
-                __timers[timerId] = {
-                    callback: callback,
-                    delay: delay,
-                    startTime: Date.now(),
-                    cancelled: false
-                };
-                return timerId;
+            // queueMicrotask (uses Promise for Hermes compatibility)
+            self.queueMicrotask = function(callback) {
+                Promise.resolve().then(callback);
             };
 
-            self.clearTimeout = function(timerId) {
-                if (__timers[timerId]) {
-                    __timers[timerId].cancelled = true;
-                    delete __timers[timerId];
+            // close() - request worker termination
+            self.close = function() {
+                if (typeof __nativeRequestClose !== 'undefined') {
+                    __nativeRequestClose();
                 }
-            };
-
-            // setInterval/clearInterval basic implementation
-            self.setInterval = function(callback, delay) {
-                var timerId = __timerIdCounter++;
-                __timers[timerId] = {
-                    callback: callback,
-                    delay: delay,
-                    interval: true,
-                    lastRun: Date.now(),
-                    cancelled: false
-                };
-                return timerId;
-            };
-
-            self.clearInterval = function(timerId) {
-                self.clearTimeout(timerId);
             };
         )";
 
@@ -456,11 +455,232 @@ void WorkerRuntime::installNativeFunctions() {
         );
         runtime.global().setProperty(runtime, "__nativeConsoleLog", consoleLogFunc);
 
+        // __nativeRequestClose
+        auto requestCloseFunc = Function::createFromHostFunction(
+            runtime,
+            PropNameID::forAscii(runtime, "__nativeRequestClose"),
+            0,
+            [self](Runtime& rt, const Value& thisVal, const Value* args, size_t count) -> Value {
+                self->requestClose();
+                return Value::undefined();
+            }
+        );
+        runtime.global().setProperty(runtime, "__nativeRequestClose", requestCloseFunc);
+
     } catch (const std::exception& e) {
         if (errorCallback_) {
             errorCallback_(workerId_, "Exception installing native functions: " + std::string(e.what()));
         }
     }
+}
+
+void WorkerRuntime::installTimerFunctions() {
+    if (!hermesRuntime_) return;
+
+    try {
+        Runtime& runtime = *hermesRuntime_;
+        auto* self = this;
+
+        // __nativeScheduleTimer(timerId, delay, repeating, callback)
+        auto scheduleTimerFunc = Function::createFromHostFunction(
+            runtime,
+            PropNameID::forAscii(runtime, "__nativeScheduleTimer"),
+            4,
+            [self](Runtime& rt, const Value& thisVal, const Value* args, size_t count) -> Value {
+                if (count < 4) {
+                    return Value::undefined();
+                }
+
+                uint64_t timerId = static_cast<uint64_t>(args[0].asNumber());
+                int64_t delay = static_cast<int64_t>(args[1].asNumber());
+                bool repeating = args[2].getBool();
+
+                // Ensure delay is non-negative
+                if (delay < 0) delay = 0;
+
+                // Store the callback function
+                auto callback = std::make_shared<Value>(rt, args[3]);
+
+                // Create the timer callback using a shared function to avoid code duplication
+                std::function<void()> timerCallback;
+
+                // Use a shared_ptr to allow the callback to reference itself for rescheduling
+                auto callbackHolder = std::make_shared<std::function<void()>>();
+
+                *callbackHolder = [self, callback, timerId, delay, repeating, callbackHolder]() {
+                    if (!self->hermesRuntime_ || !self->running_.load()) {
+                        return;
+                    }
+
+                    // Check if timer was cancelled
+                    {
+                        std::lock_guard<std::mutex> lock(self->cancelledTimersMutex_);
+                        if (self->cancelledTimers_.count(timerId) > 0) {
+                            return;
+                        }
+                    }
+
+                    Runtime& rt = *self->hermesRuntime_;
+
+                    try {
+                        if (callback->isObject() && callback->asObject(rt).isFunction(rt)) {
+                            callback->asObject(rt).asFunction(rt).call(rt);
+                        }
+                    } catch (const JSError& e) {
+                        if (self->errorCallback_) {
+                            self->errorCallback_(self->workerId_, "JSError in timer: " + e.getMessage());
+                        }
+                    }
+
+                    // Reschedule if interval and not cancelled
+                    if (repeating) {
+                        std::lock_guard<std::mutex> lock(self->cancelledTimersMutex_);
+                        if (self->cancelledTimers_.count(timerId) == 0) {
+                            Task nextTask;
+                            nextTask.type = TaskType::Timer;
+                            nextTask.id = timerId;
+                            nextTask.execute = *callbackHolder;
+                            self->taskQueue_.enqueueDelayed(std::move(nextTask),
+                                std::chrono::milliseconds(delay));
+                        }
+                    }
+                };
+
+                // Schedule the initial timer
+                Task task;
+                task.type = TaskType::Timer;
+                task.id = timerId;
+                task.execute = *callbackHolder;
+
+                self->taskQueue_.enqueueDelayed(std::move(task),
+                    std::chrono::milliseconds(delay));
+
+                return Value::undefined();
+            }
+        );
+        runtime.global().setProperty(runtime, "__nativeScheduleTimer", scheduleTimerFunc);
+
+        // __nativeCancelTimer(timerId)
+        auto cancelTimerFunc = Function::createFromHostFunction(
+            runtime,
+            PropNameID::forAscii(runtime, "__nativeCancelTimer"),
+            1,
+            [self](Runtime& rt, const Value& thisVal, const Value* args, size_t count) -> Value {
+                if (count > 0 && args[0].isNumber()) {
+                    uint64_t timerId = static_cast<uint64_t>(args[0].asNumber());
+                    self->cancelTimer(timerId);
+                }
+                return Value::undefined();
+            }
+        );
+        runtime.global().setProperty(runtime, "__nativeCancelTimer", cancelTimerFunc);
+
+        // Now add JavaScript wrapper for setTimeout, setInterval, etc.
+        std::string timerScript = R"(
+            // Timer ID counter (start high to avoid conflicts)
+            var __nextTimerId = 1;
+
+            // setTimeout
+            self.setTimeout = function(callback, delay) {
+                if (typeof callback !== 'function') {
+                    if (typeof callback === 'string') {
+                        callback = new Function(callback);
+                    } else {
+                        return 0;
+                    }
+                }
+                var timerId = __nextTimerId++;
+                var args = Array.prototype.slice.call(arguments, 2);
+                var wrappedCallback = function() {
+                    callback.apply(null, args);
+                };
+                __nativeScheduleTimer(timerId, delay || 0, false, wrappedCallback);
+                return timerId;
+            };
+
+            // clearTimeout
+            self.clearTimeout = function(timerId) {
+                if (timerId) {
+                    __nativeCancelTimer(timerId);
+                }
+            };
+
+            // setInterval
+            self.setInterval = function(callback, delay) {
+                if (typeof callback !== 'function') {
+                    if (typeof callback === 'string') {
+                        callback = new Function(callback);
+                    } else {
+                        return 0;
+                    }
+                }
+                var timerId = __nextTimerId++;
+                var args = Array.prototype.slice.call(arguments, 2);
+                var wrappedCallback = function() {
+                    callback.apply(null, args);
+                };
+                __nativeScheduleTimer(timerId, delay || 0, true, wrappedCallback);
+                return timerId;
+            };
+
+            // clearInterval (same as clearTimeout)
+            self.clearInterval = function(timerId) {
+                self.clearTimeout(timerId);
+            };
+
+            // setImmediate (non-standard but common in React Native)
+            self.setImmediate = function(callback) {
+                var args = Array.prototype.slice.call(arguments, 1);
+                return self.setTimeout(function() {
+                    callback.apply(null, args);
+                }, 0);
+            };
+
+            // clearImmediate
+            self.clearImmediate = function(timerId) {
+                self.clearTimeout(timerId);
+            };
+        )";
+
+        runtime.evaluateJavaScript(
+            std::make_shared<StringBuffer>(timerScript),
+            "worker-timers.js"
+        );
+
+    } catch (const std::exception& e) {
+        if (errorCallback_) {
+            errorCallback_(workerId_, "Exception installing timer functions: " + std::string(e.what()));
+        }
+    }
+}
+
+uint64_t WorkerRuntime::scheduleTimer(
+    std::function<void()> callback,
+    std::chrono::milliseconds delay,
+    bool repeating
+) {
+    uint64_t timerId = nextTimerId_++;
+
+    Task task;
+    task.type = TaskType::Timer;
+    task.id = timerId;
+    task.execute = std::move(callback);
+
+    taskQueue_.enqueueDelayed(std::move(task), delay);
+    return timerId;
+}
+
+void WorkerRuntime::cancelTimer(uint64_t timerId) {
+    {
+        std::lock_guard<std::mutex> lock(cancelledTimersMutex_);
+        cancelledTimers_.insert(timerId);
+    }
+    taskQueue_.cancel(timerId);
+}
+
+void WorkerRuntime::requestClose() {
+    closeRequested_ = true;
+    taskQueue_.shutdown();
 }
 
 void WorkerRuntime::handlePostMessageToHost(const std::string& message) {
@@ -512,12 +732,26 @@ bool WorkerRuntime::postMessage(const std::string& message) {
         return false;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(queueMutex_);
-        messageQueue_.push(message);
-    }
-    queueCondition_.notify_one();
+    // Create a message task and enqueue it
+    Task task;
+    task.type = TaskType::Message;
+    task.id = nextTaskId_++;
+    task.execute = [this, message]() {
+        if (!hermesRuntime_ || !running_.load()) {
+            return;
+        }
 
+        Runtime& runtime = *hermesRuntime_;
+
+        auto handleMessageProp = runtime.global().getProperty(runtime, "__handleMessage");
+
+        if (handleMessageProp.isObject() && handleMessageProp.asObject(runtime).isFunction(runtime)) {
+            auto handleMessage = handleMessageProp.asObject(runtime).asFunction(runtime);
+            handleMessage.call(runtime, String::createFromUtf8(runtime, message));
+        }
+    };
+
+    taskQueue_.enqueue(std::move(task));
     return true;
 }
 
@@ -534,6 +768,10 @@ std::string WorkerRuntime::evalScript(const std::string& script) {
             std::make_shared<StringBuffer>(script),
             "eval.js"
         );
+
+        // Drain microtasks after eval
+        static_cast<facebook::hermes::HermesRuntime*>(hermesRuntime_.get())
+            ->drainMicrotasks();
 
         // Convert result to string
         if (result.isString()) {
@@ -577,9 +815,12 @@ void WorkerRuntime::terminate() {
         return;
     }
 
+    // Signal shutdown
+    closeRequested_ = true;
+    taskQueue_.shutdown();
+
     // Notify any waiting threads
     pendingScriptCondition_.notify_all();
-    queueCondition_.notify_all();
 
     // Wait for worker thread to finish
     if (workerThread_ && workerThread_->joinable()) {

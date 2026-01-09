@@ -5,12 +5,15 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <thread>
 #include <atomic>
 #include <functional>
 #include <queue>
 #include <condition_variable>
+
+#include "TaskQueue.h"
 
 namespace webworker {
 
@@ -75,6 +78,9 @@ private:
  * WorkerRuntime - Individual worker runtime with its own Hermes instance
  *
  * Each worker runs in its own thread with a dedicated Hermes runtime.
+ * Implements proper event loop following the HTML specification model:
+ * - Macrotasks: setTimeout, setInterval, postMessage, etc.
+ * - Microtasks: Promise callbacks, queueMicrotask
  */
 class WorkerRuntime {
 public:
@@ -101,27 +107,45 @@ public:
 private:
     // Thread management
     void workerThreadMain();
-    void processMessageQueue();
+
+    // Event loop (replaces the old processMessageQueue)
+    void eventLoop();
+    void processTask(Task& task);
 
     // Runtime setup
     void setupGlobalScope();
     void installNativeFunctions();
+    void installTimerFunctions();
 
     // Message handling (called from native functions)
     void handlePostMessageToHost(const std::string& message);
     void handleConsoleLog(const std::string& level, const std::string& message);
+
+    // Timer management
+    uint64_t scheduleTimer(std::function<void()> callback,
+                           std::chrono::milliseconds delay,
+                           bool repeating);
+    void cancelTimer(uint64_t timerId);
+
+    // Close handling
+    void requestClose();
 
     std::string workerId_;
     std::unique_ptr<Runtime> hermesRuntime_;
     std::unique_ptr<std::thread> workerThread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> initialized_{false};
+    std::atomic<bool> closeRequested_{false};
     std::mutex runtimeMutex_;
 
-    // Message queue for thread-safe communication
-    std::queue<std::string> messageQueue_;
-    std::mutex queueMutex_;
-    std::condition_variable queueCondition_;
+    // Task queue for event loop
+    TaskQueue taskQueue_;
+    std::atomic<uint64_t> nextTaskId_{1};
+    std::atomic<uint64_t> nextTimerId_{1};
+
+    // Track cancelled timers for interval cleanup
+    std::unordered_set<uint64_t> cancelledTimers_;
+    std::mutex cancelledTimersMutex_;
 
     // Script to execute after initialization
     std::string pendingScript_;
