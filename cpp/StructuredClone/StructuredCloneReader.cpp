@@ -1,4 +1,5 @@
 #include "StructuredCloneReader.h"
+#include <string>
 
 namespace webworker {
 
@@ -135,9 +136,10 @@ Value StructuredCloneReader::readArray() {
     uint32_t refId = static_cast<uint32_t>(refMap_.size());
     registerObject(refId, arr);
 
+    Array arrArray = arr.asArray(runtime_);
     for (uint32_t i = 0; i < length; i++) {
         Value element = readValue();
-        arr.setProperty(runtime_, static_cast<unsigned int>(i), element);
+        arrArray.setValueAtIndex(runtime_, i, element);
     }
 
     return Value(runtime_, arr);
@@ -271,7 +273,7 @@ Value StructuredCloneReader::readArrayBuffer() {
 
         for (uint32_t i = 0; i < byteLength; i++) {
             uint8_t byte = buffer_.readU8();
-            view.setProperty(runtime_, static_cast<unsigned int>(i), Value(static_cast<double>(byte)));
+            view.setProperty(runtime_, std::to_string(i).c_str(), Value(static_cast<double>(byte)));
         }
     }
 
@@ -294,7 +296,7 @@ Value StructuredCloneReader::readTypedArray(CloneType type) {
 
         for (uint32_t i = 0; i < bufferByteLength; i++) {
             uint8_t byte = buffer_.readU8();
-            view.setProperty(runtime_, static_cast<unsigned int>(i), Value(static_cast<double>(byte)));
+            view.setProperty(runtime_, std::to_string(i).c_str(), Value(static_cast<double>(byte)));
         }
     }
 
@@ -332,7 +334,7 @@ Value StructuredCloneReader::readDataView() {
 
         for (uint32_t i = 0; i < bufferByteLength; i++) {
             uint8_t byte = buffer_.readU8();
-            view.setProperty(runtime_, static_cast<unsigned int>(i), Value(static_cast<double>(byte)));
+            view.setProperty(runtime_, std::to_string(i).c_str(), Value(static_cast<double>(byte)));
         }
     }
 
@@ -360,11 +362,12 @@ Value StructuredCloneReader::readObjectRef() {
         throw DataCloneError::invalidData();
     }
 
-    return Value(runtime_, it->second);
+    // Return a copy of the stored Value
+    return Value(runtime_, it->second.asObject(runtime_));
 }
 
 void StructuredCloneReader::registerObject(uint32_t refId, const Object& obj) {
-    refMap_[refId] = Object(runtime_, obj);
+    refMap_.emplace(refId, Value(runtime_, obj));
 }
 
 std::string StructuredCloneReader::getTypedArrayConstructorName(CloneType type) {

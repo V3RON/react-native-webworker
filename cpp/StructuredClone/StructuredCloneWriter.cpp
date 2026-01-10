@@ -1,6 +1,7 @@
 #include "StructuredCloneWriter.h"
 #include <cmath>
 #include <limits>
+#include <string>
 
 namespace webworker {
 
@@ -342,7 +343,7 @@ void StructuredCloneWriter::writeArrayBuffer(const Object& arrayBuffer) {
 
         // Read each byte
         for (uint32_t i = 0; i < byteLength; i++) {
-            Value byteVal = viewObj.getProperty(runtime_, static_cast<unsigned int>(i));
+            Value byteVal = viewObj.getProperty(runtime_, std::to_string(i).c_str());
             buffer_.writeU8(static_cast<uint8_t>(byteVal.asNumber()));
         }
     }
@@ -374,7 +375,7 @@ void StructuredCloneWriter::writeTypedArray(const Object& typedArray, CloneType 
         Object viewObj = view.asObject(runtime_);
 
         for (uint32_t i = 0; i < bufferByteLength; i++) {
-            Value byteVal = viewObj.getProperty(runtime_, static_cast<unsigned int>(i));
+            Value byteVal = viewObj.getProperty(runtime_, std::to_string(i).c_str());
             buffer_.writeU8(static_cast<uint8_t>(byteVal.asNumber()));
         }
     }
@@ -410,7 +411,7 @@ void StructuredCloneWriter::writeDataView(const Object& dataView) {
         Object viewObj = view.asObject(runtime_);
 
         for (uint32_t i = 0; i < bufferByteLength; i++) {
-            Value byteVal = viewObj.getProperty(runtime_, static_cast<unsigned int>(i));
+            Value byteVal = viewObj.getProperty(runtime_, std::to_string(i).c_str());
             buffer_.writeU8(static_cast<uint8_t>(byteVal.asNumber()));
         }
     }

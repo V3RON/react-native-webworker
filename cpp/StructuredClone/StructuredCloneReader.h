@@ -70,7 +70,7 @@ private:
 
     Runtime& runtime_;
     ReadBuffer& buffer_;
-    std::unordered_map<uint32_t, Object> refMap_;
+    std::unordered_map<uint32_t, Value> refMap_;
 };
 
 } // namespace webworker
