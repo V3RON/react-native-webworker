@@ -118,7 +118,7 @@ jobs:
         with:
           name: android-apk
           path: example/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 1
+          retention-days: 7 # Match cache default retention policy
 
   build-ios:
     runs-on: macos-latest
@@ -174,10 +174,9 @@ jobs:
         with:
           name: ios-app
           path: example/ios/build/Build/Products/Debug-iphonesimulator/WebworkerExample.app
-          retention-days: 1
+          retention-days: 7 # Match cache default retention policy
 
   harness-android:
-    name: Harness Android
     needs: build-android
     runs-on: ubuntu-latest
 
@@ -248,7 +247,6 @@ jobs:
             yarn test:harness:android
 
   harness-ios:
-    name: Harness iOS
     needs: build-ios
     runs-on: macos-latest
 
