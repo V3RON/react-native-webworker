@@ -55,8 +55,11 @@ jobs:
       - name: Build package
         run: yarn prepare
 
-  build-android:
+  harness-android:
     runs-on: ubuntu-latest
+
+    env:
+      TURBO_CACHE_DIR: .turbo/android
 
     steps:
       - name: Checkout
@@ -65,17 +68,51 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
+      - name: Cache turborepo for Android
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ env.TURBO_CACHE_DIR }}
+          key: ${{ runner.os }}-turborepo-android-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-turborepo-android-
+
+      - name: Check turborepo cache status
+        run: |
+          # Check if harness tests can be skipped entirely
+          HARNESS_CACHE_STATUS=$(node -p "($(yarn turbo run test:harness:android --cache-dir="${{ env.TURBO_CACHE_DIR }}" --dry=json)).tasks.find(t => t.task === 'test:harness:android').cache.status")
+          if [[ $HARNESS_CACHE_STATUS == "HIT" ]]; then
+            echo "harness_cache_hit=1" >> $GITHUB_ENV
+          fi
+
+          # Check if native build can be skipped (to avoid installing JDK/Gradle)
+          BUILD_CACHE_STATUS=$(node -p "($(yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}" --dry=json)).tasks.find(t => t.task === 'build:android').cache.status")
+          if [[ $BUILD_CACHE_STATUS == "HIT" ]]; then
+            echo "build_cache_hit=1" >> $GITHUB_ENV
+          fi
+
+      - name: Reclaim disk space
+        if: env.harness_cache_hit != 1
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-dotnet: true
+          remove-haskell: true
+          remove-codeql: true
+          remove-docker-images: true
+
       - name: Install JDK
+        if: env.harness_cache_hit != 1 && env.build_cache_hit != 1
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: 'zulu'
           java-version: '17'
 
       - name: Finalize Android SDK
+        if: env.harness_cache_hit != 1 && env.build_cache_hit != 1
         run: |
           /bin/bash -c "yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null"
 
       - name: Cache Gradle
+        if: env.harness_cache_hit != 1 && env.build_cache_hit != 1
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
@@ -86,81 +123,14 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Build example for Android
-        working-directory: example
+        if: env.harness_cache_hit != 1
         env:
           JAVA_OPTS: "-XX:MaxHeapSize=6g"
-        run: yarn build:android
-
-      - name: Upload Android APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: android-apk
-          path: example/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7 # Match cache default retention policy
-
-  build-ios:
-    runs-on: macos-latest
-
-    env:
-      RCT_USE_RN_DEP: 1
-      RCT_USE_PREBUILT_RNCORE: 1
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Setup
-        uses: ./.github/actions/setup
-
-      - name: Use appropriate Xcode version
-        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-
-      - name: Install cocoapods
         run: |
-          cd example
-          bundle install
-          bundle exec pod repo update --verbose
-          bundle exec pod install --project-directory=ios
-
-      - name: Build example for iOS
-        working-directory: example
-        run: yarn build:ios
-
-      - name: Upload iOS App
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ios-app
-          path: example/ios/build/Build/Products/Debug-iphonesimulator/WebworkerExample.app
-          retention-days: 7 # Match cache default retention policy
-
-  harness-android:
-    needs: build-android
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Setup
-        uses: ./.github/actions/setup
-
-      - name: Reclaim disk space
-        uses: AdityaGarg8/remove-unwanted-software@v5
-        with:
-          remove-dotnet: true
-          remove-haskell: true
-          remove-codeql: true
-          remove-docker-images: true
-
-      - name: Download Android APK
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: android-apk
-          path: example/android/app/build/outputs/apk/debug
+          yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}"
 
       - name: Enable KVM group perms
+        if: env.harness_cache_hit != 1
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
@@ -168,6 +138,7 @@ jobs:
           ls /dev/kvm
 
       - name: AVD cache
+        if: env.harness_cache_hit != 1
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         id: avd-cache
         with:
@@ -177,7 +148,7 @@ jobs:
           key: avd-${{ env.ANDROID_API_LEVEL }}-${{ env.ANDROID_ARCH }}
 
       - name: Create AVD and generate snapshot for caching
-        if: steps.avd-cache.outputs.cache-hit != 'true'
+        if: env.harness_cache_hit != 1 && steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ env.ANDROID_API_LEVEL }}
@@ -192,6 +163,7 @@ jobs:
           script: echo "Generated AVD snapshot for caching."
 
       - name: Run Harness E2E tests
+        if: env.harness_cache_hit != 1
         uses: reactivecircus/android-emulator-runner@v2
         with:
           working-directory: example
@@ -203,11 +175,15 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             adb install -r "./android/app/build/outputs/apk/debug/app-debug.apk"
-            yarn test:harness:android
+            yarn turbo run test:harness:android --cache-dir="${{ env.TURBO_CACHE_DIR }}"
 
   harness-ios:
-    needs: build-ios
     runs-on: macos-latest
+
+    env:
+      TURBO_CACHE_DIR: .turbo/ios
+      RCT_USE_RN_DEP: 1
+      RCT_USE_PREBUILT_RNCORE: 1
 
     steps:
       - name: Checkout
@@ -216,18 +192,49 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
+      - name: Cache turborepo for iOS
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ env.TURBO_CACHE_DIR }}
+          key: ${{ runner.os }}-turborepo-ios-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-turborepo-ios-
+
+      - name: Check turborepo cache status
+        run: |
+          # Check if harness tests can be skipped entirely
+          HARNESS_CACHE_STATUS=$(node -p "($(yarn turbo run test:harness:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}" --dry=json)).tasks.find(t => t.task === 'test:harness:ios').cache.status")
+          if [[ $HARNESS_CACHE_STATUS == "HIT" ]]; then
+            echo "harness_cache_hit=1" >> $GITHUB_ENV
+          fi
+
+          # Check if native build can be skipped (to avoid installing Xcode/CocoaPods)
+          BUILD_CACHE_STATUS=$(node -p "($(yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}" --dry=json)).tasks.find(t => t.task === 'build:ios').cache.status")
+          if [[ $BUILD_CACHE_STATUS == "HIT" ]]; then
+            echo "build_cache_hit=1" >> $GITHUB_ENV
+          fi
+
       - name: Use appropriate Xcode version
+        if: env.harness_cache_hit != 1 && env.build_cache_hit != 1
         uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
-      - name: Download iOS App
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: ios-app
-          path: example/ios/build/Build/Products/Debug-iphonesimulator
+      - name: Install cocoapods
+        if: env.harness_cache_hit != 1 && env.build_cache_hit != 1
+        run: |
+          cd example
+          bundle install
+          bundle exec pod repo update --verbose
+          bundle exec pod install --project-directory=ios
+
+      - name: Build example for iOS
+        if: env.harness_cache_hit != 1
+        run: |
+          yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
 
       - name: Setup iOS Simulator
+        if: env.harness_cache_hit != 1
         uses: futureware-tech/simulator-action@v4
         with:
           model: ${{ env.IOS_DEVICE_MODEL }}
@@ -237,10 +244,11 @@ jobs:
           erase_before_boot: false
 
       - name: Install app on simulator
+        if: env.harness_cache_hit != 1
         run: |
           xcrun simctl install booted example/ios/build/Build/Products/Debug-iphonesimulator/WebworkerExample.app
 
       - name: Run Harness E2E tests
-        working-directory: example
+        if: env.harness_cache_hit != 1
         run: |
-          yarn test:harness:ios
+          yarn turbo run test:harness:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
