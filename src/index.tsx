@@ -1,9 +1,8 @@
 import NativeWebworker, {
-  webworkerEventEmitter,
   type WorkerMessageEvent,
   type WorkerErrorEvent,
 } from './NativeWebworker';
-import type { EmitterSubscription } from 'react-native';
+import type { EventSubscription } from 'react-native';
 
 // Types
 export interface WorkerOptions {
@@ -33,8 +32,8 @@ export class Worker<TIn = unknown, TOut = unknown> {
   private _onmessage: MessageHandler<TOut> | null = null;
   private _onerror: ((error: Error) => void) | null = null;
   private initPromise: Promise<void>;
-  private messageSubscription: EmitterSubscription | null = null;
-  private errorSubscription: EmitterSubscription | null = null;
+  private messageSubscription: EventSubscription | null = null;
+  private errorSubscription: EventSubscription | null = null;
 
   constructor(options: WorkerOptions) {
     const { script, scriptPath, name } = options;
@@ -60,11 +59,9 @@ export class Worker<TIn = unknown, TOut = unknown> {
   }
 
   private setupEventListeners(): void {
-    // Listen for messages from this worker
-    this.messageSubscription = webworkerEventEmitter.addListener(
-      'onWorkerMessage',
-      (nativeEvent) => {
-        const event = nativeEvent as WorkerMessageEvent;
+    // Listen for messages from this worker using CodegenTypes.EventEmitter
+    this.messageSubscription = NativeWebworker.onWorkerMessage(
+      (event: WorkerMessageEvent) => {
         if (event.workerId === this.workerId && !this.isTerminated) {
           try {
             const data = JSON.parse(event.message) as TOut;
@@ -77,11 +74,9 @@ export class Worker<TIn = unknown, TOut = unknown> {
       }
     );
 
-    // Listen for errors from this worker
-    this.errorSubscription = webworkerEventEmitter.addListener(
-      'onWorkerError',
-      (nativeEvent) => {
-        const event = nativeEvent as WorkerErrorEvent;
+    // Listen for errors from this worker using CodegenTypes.EventEmitter
+    this.errorSubscription = NativeWebworker.onWorkerError(
+      (event: WorkerErrorEvent) => {
         if (event.workerId === this.workerId && !this.isTerminated) {
           if (this._onerror) {
             this._onerror(new Error(event.error));
@@ -357,7 +352,7 @@ export class WorkerPool<TIn = unknown, TOut = unknown> {
 }
 
 // Export native module for direct access if needed
-export { NativeWebworker, webworkerEventEmitter };
+export { NativeWebworker };
 
 // Re-export event types
 export type {

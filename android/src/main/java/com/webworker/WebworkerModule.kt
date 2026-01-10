@@ -4,8 +4,6 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.module.annotations.ReactModule
 
 /**
@@ -31,7 +29,7 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
 
     override fun onMessage(workerId: String, message: String) {
         Log.d(TAG, "[$workerId] Message from worker")
-        sendEvent(EVENT_WORKER_MESSAGE, Arguments.createMap().apply {
+        emitOnWorkerMessage(Arguments.createMap().apply {
             putString("workerId", workerId)
             putString("message", message)
         })
@@ -39,7 +37,7 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
 
     override fun onError(workerId: String, error: String) {
         Log.e(TAG, "[$workerId] Error: $error")
-        sendEvent(EVENT_WORKER_ERROR, Arguments.createMap().apply {
+        emitOnWorkerError(Arguments.createMap().apply {
             putString("workerId", workerId)
             putString("error", error)
         })
@@ -47,17 +45,11 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
 
     override fun onConsole(workerId: String, level: String, message: String) {
         Log.d(TAG, "[$workerId] [$level] $message")
-        sendEvent(EVENT_WORKER_CONSOLE, Arguments.createMap().apply {
+        emitOnWorkerConsole(Arguments.createMap().apply {
             putString("workerId", workerId)
             putString("level", level)
             putString("message", message)
         })
-    }
-
-    private fun sendEvent(eventName: String, params: com.facebook.react.bridge.WritableMap) {
-        reactApplicationContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit(eventName, params)
     }
 
     // ============================================================================
@@ -116,20 +108,6 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
     }
 
     // ============================================================================
-    // Event emitter support methods (required by NativeWebworkerSpec)
-    // ============================================================================
-
-    override fun addListener(eventType: String) {
-        // Required for NativeEventEmitter compatibility
-        // No-op on Android as we don't need to track listener count
-    }
-
-    override fun removeListeners(count: Double) {
-        // Required for NativeEventEmitter compatibility
-        // No-op on Android as we don't need to track listener count
-    }
-
-    // ============================================================================
     // Helper methods
     // ============================================================================
 
@@ -160,10 +138,5 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
     companion object {
         const val NAME = "Webworker"
         private const val TAG = "WebworkerModule"
-
-        // Event names - must match iOS (ios/Webworker.mm)
-        private const val EVENT_WORKER_MESSAGE = "onWorkerMessage"
-        private const val EVENT_WORKER_CONSOLE = "onWorkerConsole"
-        private const val EVENT_WORKER_ERROR = "onWorkerError"
     }
 }

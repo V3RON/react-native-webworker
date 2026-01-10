@@ -1,9 +1,22 @@
-import {
-  TurboModuleRegistry,
-  type TurboModule,
-  NativeEventEmitter,
-  Platform,
-} from 'react-native';
+import type { TurboModule, CodegenTypes } from 'react-native';
+import { TurboModuleRegistry } from 'react-native';
+
+// Event payload types
+export type WorkerMessageEvent = {
+  workerId: string;
+  message: string;
+};
+
+export type WorkerConsoleEvent = {
+  workerId: string;
+  level: string;
+  message: string;
+};
+
+export type WorkerErrorEvent = {
+  workerId: string;
+  error: string;
+};
 
 export interface Spec extends TurboModule {
   /**
@@ -35,40 +48,22 @@ export interface Spec extends TurboModule {
   evalScript(workerId: string, script: string): Promise<string>;
 
   /**
-   * Add event listener (required for NativeEventEmitter on iOS)
+   * Event emitted when a worker posts a message to the host
    */
-  addListener(eventType: string): void;
+  readonly onWorkerMessage: CodegenTypes.EventEmitter<WorkerMessageEvent>;
 
   /**
-   * Remove event listeners (required for NativeEventEmitter on iOS)
+   * Event emitted when a worker logs to console
    */
-  removeListeners(count: number): void;
+  readonly onWorkerConsole: CodegenTypes.EventEmitter<WorkerConsoleEvent>;
+
+  /**
+   * Event emitted when a worker encounters an error
+   */
+  readonly onWorkerError: CodegenTypes.EventEmitter<WorkerErrorEvent>;
 }
 
 // Get the TurboModule - will throw if not available (New Architecture only)
 const NativeWebworker = TurboModuleRegistry.getEnforcing<Spec>('Webworker');
-
-// Event types emitted by the native module
-export interface WorkerMessageEvent {
-  workerId: string;
-  message: string;
-}
-
-export interface WorkerConsoleEvent {
-  workerId: string;
-  level: string;
-  message: string;
-}
-
-export interface WorkerErrorEvent {
-  workerId: string;
-  error: string;
-}
-
-// Create event emitter for listening to native events
-// On iOS, we pass the module itself; on Android, we'll handle it differently
-export const webworkerEventEmitter = new NativeEventEmitter(
-  Platform.OS === 'ios' ? NativeWebworker : undefined
-);
 
 export default NativeWebworker;

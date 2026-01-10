@@ -35,11 +35,10 @@
       NSString *workerIdStr = [NSString stringWithUTF8String:workerId.c_str()];
       NSString *messageStr = [NSString stringWithUTF8String:message.c_str()];
       dispatch_async(dispatch_get_main_queue(), ^{
-        [strongSelf sendEventWithName:@"onWorkerMessage"
-                                 body:@{
-                                   @"workerId" : workerIdStr,
-                                   @"message" : messageStr
-                                 }];
+        [strongSelf emitOnWorkerMessage:@{
+          @"workerId" : workerIdStr,
+          @"message" : messageStr
+        }];
       });
     }
   });
@@ -57,12 +56,11 @@
       NSString *levelStr = [NSString stringWithUTF8String:level.c_str()];
       NSString *messageStr = [NSString stringWithUTF8String:message.c_str()];
       dispatch_async(dispatch_get_main_queue(), ^{
-        [strongSelf sendEventWithName:@"onWorkerConsole"
-                                 body:@{
-                                   @"workerId" : workerIdStr,
-                                   @"level" : levelStr,
-                                   @"message" : messageStr
-                                 }];
+        [strongSelf emitOnWorkerConsole:@{
+          @"workerId" : workerIdStr,
+          @"level" : levelStr,
+          @"message" : messageStr
+        }];
       });
     }
   });
@@ -77,11 +75,10 @@
       NSString *workerIdStr = [NSString stringWithUTF8String:workerId.c_str()];
       NSString *errorStr = [NSString stringWithUTF8String:error.c_str()];
       dispatch_async(dispatch_get_main_queue(), ^{
-        [strongSelf sendEventWithName:@"onWorkerError"
-                                 body:@{
-                                   @"workerId" : workerIdStr,
-                                   @"error" : errorStr
-                                 }];
+        [strongSelf emitOnWorkerError:@{
+          @"workerId" : workerIdStr,
+          @"error" : errorStr
+        }];
       });
     }
   });
@@ -95,15 +92,10 @@
   return NO;
 }
 
-- (NSArray<NSString *> *)supportedEvents {
-  return @[ @"onWorkerMessage", @"onWorkerConsole", @"onWorkerError" ];
-}
-
 - (void)invalidate {
   if (_core) {
     _core->terminateAll();
   }
-  [super invalidate];
 }
 
 // MARK: - TurboModule Methods
