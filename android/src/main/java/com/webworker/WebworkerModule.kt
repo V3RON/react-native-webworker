@@ -5,6 +5,16 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.module.annotations.ReactModule
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
 
 /**
  * React Native TurboModule for WebWorker support.
@@ -15,6 +25,8 @@ import com.facebook.react.module.annotations.ReactModule
 @ReactModule(name = WebworkerModule.NAME)
 class WebworkerModule(reactContext: ReactApplicationContext) :
     NativeWebworkerSpec(reactContext), WebWorkerNative.WorkerCallback {
+
+    private val client = OkHttpClient()
 
     init {
         // Initialize the native core with this module as the callback receiver
@@ -49,6 +61,71 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
             putString("workerId", workerId)
             putString("level", level)
             putString("message", message)
+        })
+    }
+
+    override fun onFetch(
+        workerId: String,
+        requestId: String,
+        url: String,
+        method: String,
+        headerKeys: Array<String>,
+        headerValues: Array<String>,
+        body: ByteArray?
+    ) {
+        val requestBuilder = Request.Builder()
+            .url(url)
+
+        // Headers
+        var contentType: MediaType? = null
+        for (i in headerKeys.indices) {
+            val key = headerKeys[i]
+            val value = headerValues[i]
+            requestBuilder.addHeader(key, value)
+            if (key.equals("Content-Type", ignoreCase = true)) {
+                contentType = value.toMediaTypeOrNull()
+            }
+        }
+
+        // Body
+        val requestBody = if (body != null && body.isNotEmpty()) {
+            body.toRequestBody(contentType)
+        } else if (method.equals("POST", ignoreCase = true) || method.equals("PUT", ignoreCase = true) || method.equals("PATCH", ignoreCase = true)) {
+             ByteArray(0).toRequestBody(null)
+        } else {
+             null
+        }
+
+        requestBuilder.method(method, requestBody)
+
+        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                WebWorkerNative.handleFetchResponse(
+                    workerId, requestId, 0, emptyArray(), emptyArray(), null, e.message
+                )
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseBody = response.body?.bytes()
+                val headers = response.headers
+                val keys = mutableListOf<String>()
+                val values = mutableListOf<String>()
+
+                for (i in 0 until headers.size) {
+                    keys.add(headers.name(i))
+                    values.add(headers.value(i))
+                }
+
+                WebWorkerNative.handleFetchResponse(
+                    workerId,
+                    requestId,
+                    response.code,
+                    keys.toTypedArray(),
+                    values.toTypedArray(),
+                    responseBody,
+                    null
+                )
+            }
         })
     }
 

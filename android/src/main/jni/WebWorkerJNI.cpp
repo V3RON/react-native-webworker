@@ -2,15 +2,13 @@
 // WebWorkerJNI.cpp
 // Thin JNI wrapper around shared C++ WebWorkerCore
 //
-// This is the Android equivalent of ios/Webworker.mm - a minimal platform binding
-// that delegates all logic to the shared C++ core.
-//
 
 #include <jni.h>
 #include <string>
 #include <memory>
 #include <android/log.h>
 #include "WebWorkerCore.h"
+#include "networking/FetchTypes.h"
 
 #define LOG_TAG "WebWorkerJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -23,6 +21,7 @@ static jobject gCallbackRef = nullptr;
 static jmethodID gOnMessageMethod = nullptr;
 static jmethodID gOnErrorMethod = nullptr;
 static jmethodID gOnConsoleMethod = nullptr;
+static jmethodID gOnFetchMethod = nullptr;
 
 // Helper to convert jstring to std::string
 static std::string jstringToString(JNIEnv* env, jstring jstr) {
@@ -53,13 +52,10 @@ static JNIEnv* getJNIEnv() {
 static void setupCallbacks() {
     if (!gCore) return;
 
-    // Message callback - called when worker posts a message to host
+    // Message callback
     gCore->setMessageCallback([](const std::string& workerId, const std::string& message) {
         JNIEnv* env = getJNIEnv();
-        if (env == nullptr || gCallbackRef == nullptr || gOnMessageMethod == nullptr) {
-            LOGE("Cannot invoke onMessage callback - JNI not ready");
-            return;
-        }
+        if (env == nullptr || gCallbackRef == nullptr || gOnMessageMethod == nullptr) return;
 
         jstring jWorkerId = env->NewStringUTF(workerId.c_str());
         jstring jMessage = env->NewStringUTF(message.c_str());
@@ -75,14 +71,10 @@ static void setupCallbacks() {
         }
     });
 
-    // Console callback - called for worker console.log/error/etc
+    // Console callback
     gCore->setConsoleCallback([](const std::string& workerId, const std::string& level, const std::string& message) {
-        LOGI("[Worker %s] [%s] %s", workerId.c_str(), level.c_str(), message.c_str());
-
         JNIEnv* env = getJNIEnv();
-        if (env == nullptr || gCallbackRef == nullptr || gOnConsoleMethod == nullptr) {
-            return;
-        }
+        if (env == nullptr || gCallbackRef == nullptr || gOnConsoleMethod == nullptr) return;
 
         jstring jWorkerId = env->NewStringUTF(workerId.c_str());
         jstring jLevel = env->NewStringUTF(level.c_str());
@@ -100,14 +92,10 @@ static void setupCallbacks() {
         }
     });
 
-    // Error callback - called when worker encounters an error
+    // Error callback
     gCore->setErrorCallback([](const std::string& workerId, const std::string& error) {
-        LOGE("[Worker %s] ERROR: %s", workerId.c_str(), error.c_str());
-
         JNIEnv* env = getJNIEnv();
-        if (env == nullptr || gCallbackRef == nullptr || gOnErrorMethod == nullptr) {
-            return;
-        }
+        if (env == nullptr || gCallbackRef == nullptr || gOnErrorMethod == nullptr) return;
 
         jstring jWorkerId = env->NewStringUTF(workerId.c_str());
         jstring jError = env->NewStringUTF(error.c_str());
@@ -117,6 +105,53 @@ static void setupCallbacks() {
         env->DeleteLocalRef(jWorkerId);
         env->DeleteLocalRef(jError);
 
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+    });
+
+    // Fetch callback
+    gCore->setFetchCallback([](const std::string& workerId, const webworker::FetchRequest& request) {
+        JNIEnv* env = getJNIEnv();
+        if (env == nullptr || gCallbackRef == nullptr || gOnFetchMethod == nullptr) return;
+
+        jstring jWorkerId = env->NewStringUTF(workerId.c_str());
+        jstring jRequestId = env->NewStringUTF(request.requestId.c_str());
+        jstring jUrl = env->NewStringUTF(request.url.c_str());
+        jstring jMethod = env->NewStringUTF(request.method.c_str());
+        
+        jclass strClass = env->FindClass("java/lang/String");
+        jobjectArray jHeaderKeys = env->NewObjectArray(request.headers.size(), strClass, nullptr);
+        jobjectArray jHeaderValues = env->NewObjectArray(request.headers.size(), strClass, nullptr);
+        
+        int i = 0;
+        for (const auto& header : request.headers) {
+            jstring key = env->NewStringUTF(header.first.c_str());
+            jstring value = env->NewStringUTF(header.second.c_str());
+            env->SetObjectArrayElement(jHeaderKeys, i, key);
+            env->SetObjectArrayElement(jHeaderValues, i, value);
+            env->DeleteLocalRef(key);
+            env->DeleteLocalRef(value);
+            i++;
+        }
+
+        jbyteArray jBody = nullptr;
+        if (!request.body.empty()) {
+            jBody = env->NewByteArray(request.body.size());
+            env->SetByteArrayRegion(jBody, 0, request.body.size(), (const jbyte*)request.body.data());
+        }
+
+        env->CallVoidMethod(gCallbackRef, gOnFetchMethod, jWorkerId, jRequestId, jUrl, jMethod, jHeaderKeys, jHeaderValues, jBody);
+
+        env->DeleteLocalRef(jWorkerId);
+        env->DeleteLocalRef(jRequestId);
+        env->DeleteLocalRef(jUrl);
+        env->DeleteLocalRef(jMethod);
+        env->DeleteLocalRef(jHeaderKeys);
+        env->DeleteLocalRef(jHeaderValues);
+        if (jBody) env->DeleteLocalRef(jBody);
+        
         if (env->ExceptionCheck()) {
             env->ExceptionDescribe();
             env->ExceptionClear();
@@ -137,41 +172,27 @@ Java_com_webworker_WebWorkerNative_nativeInit(
     jobject thiz,
     jobject callback
 ) {
-    LOGI("Initializing WebWorkerCore");
-
-    // Clean up any existing core
     if (gCore) {
         gCore->terminateAll();
         gCore.reset();
     }
-
-    // Clean up old callback reference
     if (gCallbackRef != nullptr) {
         env->DeleteGlobalRef(gCallbackRef);
         gCallbackRef = nullptr;
     }
 
-    // Create new core
     gCore = std::make_shared<webworker::WebWorkerCore>();
 
-    // Store callback reference and get method IDs
     if (callback != nullptr) {
         gCallbackRef = env->NewGlobalRef(callback);
-
         jclass callbackClass = env->GetObjectClass(callback);
         gOnMessageMethod = env->GetMethodID(callbackClass, "onMessage", "(Ljava/lang/String;Ljava/lang/String;)V");
         gOnErrorMethod = env->GetMethodID(callbackClass, "onError", "(Ljava/lang/String;Ljava/lang/String;)V");
         gOnConsoleMethod = env->GetMethodID(callbackClass, "onConsole", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-
-        if (gOnMessageMethod == nullptr || gOnErrorMethod == nullptr || gOnConsoleMethod == nullptr) {
-            LOGE("Failed to get callback method IDs");
-        }
+        gOnFetchMethod = env->GetMethodID(callbackClass, "onFetch", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[B)V");
     }
 
-    // Setup callbacks to route events to Java
     setupCallbacks();
-
-    LOGI("WebWorkerCore initialized successfully");
 }
 
 JNIEXPORT jstring JNICALL
@@ -181,21 +202,13 @@ Java_com_webworker_WebWorkerNative_nativeCreateWorker(
     jstring workerId,
     jstring script
 ) {
-    if (!gCore) {
-        jclass exClass = env->FindClass("java/lang/RuntimeException");
-        env->ThrowNew(exClass, "WebWorkerCore not initialized");
-        return nullptr;
-    }
-
+    if (!gCore) return nullptr;
     std::string id = jstringToString(env, workerId);
     std::string scriptStr = jstringToString(env, script);
-
     try {
         std::string resultId = gCore->createWorker(id, scriptStr);
-        LOGI("Created worker: %s", resultId.c_str());
         return env->NewStringUTF(resultId.c_str());
     } catch (const std::exception& e) {
-        LOGE("Failed to create worker: %s", e.what());
         jclass exClass = env->FindClass("java/lang/RuntimeException");
         env->ThrowNew(exClass, e.what());
         return nullptr;
@@ -208,18 +221,8 @@ Java_com_webworker_WebWorkerNative_nativeTerminateWorker(
     jobject thiz,
     jstring workerId
 ) {
-    if (!gCore) {
-        return JNI_FALSE;
-    }
-
-    std::string id = jstringToString(env, workerId);
-
-    bool success = gCore->terminateWorker(id);
-    if (success) {
-        LOGI("Terminated worker: %s", id.c_str());
-    }
-
-    return success ? JNI_TRUE : JNI_FALSE;
+    if (!gCore) return JNI_FALSE;
+    return gCore->terminateWorker(jstringToString(env, workerId)) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -229,15 +232,8 @@ Java_com_webworker_WebWorkerNative_nativePostMessage(
     jstring workerId,
     jstring message
 ) {
-    if (!gCore) {
-        return JNI_FALSE;
-    }
-
-    std::string id = jstringToString(env, workerId);
-    std::string msg = jstringToString(env, message);
-
-    bool success = gCore->postMessage(id, msg);
-    return success ? JNI_TRUE : JNI_FALSE;
+    if (!gCore) return JNI_FALSE;
+    return gCore->postMessage(jstringToString(env, workerId), jstringToString(env, message)) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jstring JNICALL
@@ -247,20 +243,11 @@ Java_com_webworker_WebWorkerNative_nativeEvalScript(
     jstring workerId,
     jstring script
 ) {
-    if (!gCore) {
-        jclass exClass = env->FindClass("java/lang/RuntimeException");
-        env->ThrowNew(exClass, "WebWorkerCore not initialized");
-        return nullptr;
-    }
-
-    std::string id = jstringToString(env, workerId);
-    std::string scriptStr = jstringToString(env, script);
-
+    if (!gCore) return nullptr;
     try {
-        std::string result = gCore->evalScript(id, scriptStr);
+        std::string result = gCore->evalScript(jstringToString(env, workerId), jstringToString(env, script));
         return env->NewStringUTF(result.c_str());
     } catch (const std::exception& e) {
-        LOGE("Failed to evaluate script: %s", e.what());
         jclass exClass = env->FindClass("java/lang/RuntimeException");
         env->ThrowNew(exClass, e.what());
         return nullptr;
@@ -272,21 +259,14 @@ Java_com_webworker_WebWorkerNative_nativeCleanup(
     JNIEnv* env,
     jobject thiz
 ) {
-    LOGI("Cleaning up WebWorkerCore");
-
     if (gCore) {
         gCore->terminateAll();
         gCore.reset();
     }
-
     if (gCallbackRef != nullptr) {
         env->DeleteGlobalRef(gCallbackRef);
         gCallbackRef = nullptr;
     }
-
-    gOnMessageMethod = nullptr;
-    gOnErrorMethod = nullptr;
-    gOnConsoleMethod = nullptr;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -295,12 +275,8 @@ Java_com_webworker_WebWorkerNative_nativeHasWorker(
     jobject thiz,
     jstring workerId
 ) {
-    if (!gCore) {
-        return JNI_FALSE;
-    }
-
-    std::string id = jstringToString(env, workerId);
-    return gCore->hasWorker(id) ? JNI_TRUE : JNI_FALSE;
+    if (!gCore) return JNI_FALSE;
+    return gCore->hasWorker(jstringToString(env, workerId)) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -309,12 +285,51 @@ Java_com_webworker_WebWorkerNative_nativeIsWorkerRunning(
     jobject thiz,
     jstring workerId
 ) {
-    if (!gCore) {
-        return JNI_FALSE;
-    }
+    if (!gCore) return JNI_FALSE;
+    return gCore->isWorkerRunning(jstringToString(env, workerId)) ? JNI_TRUE : JNI_FALSE;
+}
 
-    std::string id = jstringToString(env, workerId);
-    return gCore->isWorkerRunning(id) ? JNI_TRUE : JNI_FALSE;
+JNIEXPORT void JNICALL
+Java_com_webworker_WebWorkerNative_nativeHandleFetchResponse(
+    JNIEnv* env,
+    jobject thiz,
+    jstring workerId,
+    jstring requestId,
+    jint status,
+    jobjectArray headerKeys,
+    jobjectArray headerValues,
+    jbyteArray body,
+    jstring error
+) {
+    if (!gCore) return;
+
+    webworker::FetchResponse response;
+    response.requestId = jstringToString(env, requestId);
+    
+    std::string errorStr = jstringToString(env, error);
+    if (!errorStr.empty()) {
+        response.error = errorStr;
+    } else {
+        response.status = status;
+        
+        int count = env->GetArrayLength(headerKeys);
+        for (int i = 0; i < count; i++) {
+            jstring key = (jstring)env->GetObjectArrayElement(headerKeys, i);
+            jstring value = (jstring)env->GetObjectArrayElement(headerValues, i);
+            response.headers[jstringToString(env, key)] = jstringToString(env, value);
+            env->DeleteLocalRef(key);
+            env->DeleteLocalRef(value);
+        }
+        
+        if (body != nullptr) {
+            jsize len = env->GetArrayLength(body);
+            jbyte* bytes = env->GetByteArrayElements(body, nullptr);
+            response.body.assign(bytes, bytes + len);
+            env->ReleaseByteArrayElements(body, bytes, JNI_ABORT);
+        }
+    }
+    
+    gCore->handleFetchResponse(jstringToString(env, workerId), response);
 }
 
 } // extern "C"
