@@ -27,8 +27,8 @@ object WebWorkerNative {
      * This matches the callback system used in the shared C++ core.
      */
     interface WorkerCallback {
-        /** Called when a worker posts a message to the host */
-        fun onMessage(workerId: String, message: String)
+        /** Called when a worker posts a binary message using structured clone */
+        fun onBinaryMessage(workerId: String, data: ByteArray)
 
         /** Called when a worker encounters an error */
         fun onError(workerId: String, error: String)
@@ -70,11 +70,12 @@ object WebWorkerNative {
     }
 
     /**
-     * Post a message to a worker.
+     * Post a message to a worker using structured clone algorithm.
+     * @param data Binary data serialized using structured clone
      * @return true if message was posted successfully
      */
-    fun postMessage(workerId: String, message: String): Boolean {
-        return nativePostMessage(workerId, message)
+    fun postMessageBinary(workerId: String, data: ByteArray): Boolean {
+        return nativePostMessageBinary(workerId, data)
     }
 
     /**
@@ -114,7 +115,7 @@ object WebWorkerNative {
     private external fun nativeInit(callback: WorkerCallback)
     private external fun nativeCreateWorker(workerId: String, script: String): String
     private external fun nativeTerminateWorker(workerId: String): Boolean
-    private external fun nativePostMessage(workerId: String, message: String): Boolean
+    private external fun nativePostMessageBinary(workerId: String, data: ByteArray): Boolean
     private external fun nativeEvalScript(workerId: String, script: String): String
     private external fun nativeHasWorker(workerId: String): Boolean
     private external fun nativeIsWorkerRunning(workerId: String): Boolean

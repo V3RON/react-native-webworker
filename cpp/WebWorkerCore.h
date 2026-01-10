@@ -23,11 +23,6 @@ using namespace facebook::jsi;
 class WorkerRuntime;
 
 /**
- * Callback type for messages sent from worker to host
- */
-using MessageCallback = std::function<void(const std::string& workerId, const std::string& message)>;
-
-/**
  * Callback type for console output from workers
  */
 using ConsoleCallback = std::function<void(const std::string& workerId, const std::string& level, const std::string& message)>;
@@ -38,7 +33,7 @@ using ConsoleCallback = std::function<void(const std::string& workerId, const st
 using ErrorCallback = std::function<void(const std::string& workerId, const std::string& error)>;
 
 /**
- * Callback type for structured clone messages (binary data)
+ * Callback type for messages sent from worker to host using structured clone algorithm
  */
 using BinaryMessageCallback = std::function<void(const std::string& workerId, const std::vector<uint8_t>& data)>;
 
@@ -59,12 +54,10 @@ public:
     void terminateAll();
 
     // Communication
-    bool postMessage(const std::string& workerId, const std::string& message);
     bool postMessageBinary(const std::string& workerId, const std::vector<uint8_t>& data);
     std::string evalScript(const std::string& workerId, const std::string& script);
 
     // Callbacks
-    void setMessageCallback(MessageCallback callback);
     void setBinaryMessageCallback(BinaryMessageCallback callback);
     void setConsoleCallback(ConsoleCallback callback);
     void setErrorCallback(ErrorCallback callback);
@@ -77,7 +70,6 @@ private:
     std::unordered_map<std::string, std::unique_ptr<WorkerRuntime>> workers_;
     mutable std::mutex workersMutex_;
 
-    MessageCallback messageCallback_;
     BinaryMessageCallback binaryMessageCallback_;
     ConsoleCallback consoleCallback_;
     ErrorCallback errorCallback_;
@@ -94,7 +86,6 @@ private:
 class WorkerRuntime {
 public:
     WorkerRuntime(const std::string& workerId,
-                  MessageCallback messageCallback,
                   BinaryMessageCallback binaryMessageCallback,
                   ConsoleCallback consoleCallback,
                   ErrorCallback errorCallback);
@@ -105,7 +96,6 @@ public:
     std::string evalScript(const std::string& script);
 
     // Messaging
-    bool postMessage(const std::string& message);
     bool postMessageBinary(const std::vector<uint8_t>& data);
 
     // Lifecycle
@@ -129,7 +119,6 @@ private:
     void installTimerFunctions();
 
     // Message handling (called from native functions)
-    void handlePostMessageToHost(const std::string& message);
     void handleBinaryMessageToHost(const std::vector<uint8_t>& data);
     void handleConsoleLog(const std::string& level, const std::string& message);
 
@@ -167,7 +156,6 @@ private:
     bool scriptExecuted_{false};
 
     // Callbacks
-    MessageCallback messageCallback_;
     BinaryMessageCallback binaryMessageCallback_;
     ConsoleCallback consoleCallback_;
     ErrorCallback errorCallback_;

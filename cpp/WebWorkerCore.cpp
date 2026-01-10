@@ -11,8 +11,7 @@ namespace webworker {
 // ============================================================================
 
 WebWorkerCore::WebWorkerCore()
-    : messageCallback_(nullptr)
-    , binaryMessageCallback_(nullptr)
+    : binaryMessageCallback_(nullptr)
     , consoleCallback_(nullptr)
     , errorCallback_(nullptr) {
 }
@@ -33,7 +32,6 @@ std::string WebWorkerCore::createWorker(
 
     auto worker = std::make_unique<WorkerRuntime>(
         workerId,
-        messageCallback_,
         binaryMessageCallback_,
         consoleCallback_,
         errorCallback_
@@ -69,20 +67,6 @@ void WebWorkerCore::terminateAll() {
     workers_.clear();
 }
 
-bool WebWorkerCore::postMessage(
-    const std::string& workerId,
-    const std::string& message
-) {
-    std::lock_guard<std::mutex> lock(workersMutex_);
-
-    auto it = workers_.find(workerId);
-    if (it == workers_.end() || !it->second->isRunning()) {
-        return false;
-    }
-
-    return it->second->postMessage(message);
-}
-
 bool WebWorkerCore::postMessageBinary(
     const std::string& workerId,
     const std::vector<uint8_t>& data
@@ -109,10 +93,6 @@ std::string WebWorkerCore::evalScript(
     }
 
     return it->second->evalScript(script);
-}
-
-void WebWorkerCore::setMessageCallback(MessageCallback callback) {
-    messageCallback_ = callback;
 }
 
 void WebWorkerCore::setBinaryMessageCallback(BinaryMessageCallback callback) {
@@ -144,13 +124,11 @@ bool WebWorkerCore::isWorkerRunning(const std::string& workerId) const {
 
 WorkerRuntime::WorkerRuntime(
     const std::string& workerId,
-    MessageCallback messageCallback,
     BinaryMessageCallback binaryMessageCallback,
     ConsoleCallback consoleCallback,
     ErrorCallback errorCallback
 )
     : workerId_(workerId)
-    , messageCallback_(messageCallback)
     , binaryMessageCallback_(binaryMessageCallback)
     , consoleCallback_(consoleCallback)
     , errorCallback_(errorCallback) {
@@ -703,12 +681,6 @@ void WorkerRuntime::requestClose() {
     taskQueue_.shutdown();
 }
 
-void WorkerRuntime::handlePostMessageToHost(const std::string& message) {
-    if (messageCallback_) {
-        messageCallback_(workerId_, message);
-    }
-}
-
 void WorkerRuntime::handleBinaryMessageToHost(const std::vector<uint8_t>& data) {
     if (binaryMessageCallback_) {
         binaryMessageCallback_(workerId_, data);
@@ -751,34 +723,6 @@ bool WorkerRuntime::loadScript(const std::string& script) {
     }
 
     return scriptExecuted_;
-}
-
-bool WorkerRuntime::postMessage(const std::string& message) {
-    if (!running_.load()) {
-        return false;
-    }
-
-    // Create a message task and enqueue it
-    Task task;
-    task.type = TaskType::Message;
-    task.id = nextTaskId_++;
-    task.execute = [this, message]() {
-        if (!hermesRuntime_ || !running_.load()) {
-            return;
-        }
-
-        Runtime& runtime = *hermesRuntime_;
-
-        auto handleMessageProp = runtime.global().getProperty(runtime, "__handleMessage");
-
-        if (handleMessageProp.isObject() && handleMessageProp.asObject(runtime).isFunction(runtime)) {
-            auto handleMessage = handleMessageProp.asObject(runtime).asFunction(runtime);
-            handleMessage.call(runtime, String::createFromUtf8(runtime, message));
-        }
-    };
-
-    taskQueue_.enqueue(std::move(task));
-    return true;
 }
 
 bool WorkerRuntime::postMessageBinary(const std::vector<uint8_t>& data) {

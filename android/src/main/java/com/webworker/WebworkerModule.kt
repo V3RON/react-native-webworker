@@ -27,11 +27,12 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
     // Callback handlers - route events from C++ core to JavaScript
     // ============================================================================
 
-    override fun onMessage(workerId: String, message: String) {
-        Log.d(TAG, "[$workerId] Message from worker")
-        emitOnWorkerMessage(Arguments.createMap().apply {
+    override fun onBinaryMessage(workerId: String, data: ByteArray) {
+        Log.d(TAG, "[$workerId] Binary message from worker (${data.size} bytes)")
+        val base64Data = android.util.Base64.encodeToString(data, android.util.Base64.DEFAULT)
+        emitOnWorkerBinaryMessage(Arguments.createMap().apply {
             putString("workerId", workerId)
-            putString("message", message)
+            putString("data", base64Data)
         })
     }
 
@@ -87,13 +88,18 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    override fun postMessage(workerId: String, message: String, promise: Promise) {
+    override fun postMessageBinary(workerId: String, data: String, promise: Promise) {
         try {
-            val success = WebWorkerNative.postMessage(workerId, message)
+            // Decode base64 to binary
+            val binaryData = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+            val success = WebWorkerNative.postMessageBinary(workerId, binaryData)
             promise.resolve(success)
+        } catch (e: IllegalArgumentException) {
+            Log.e(TAG, "Invalid base64 data: ${e.message}")
+            promise.reject("POST_MESSAGE_ERROR", "Invalid base64 data", e)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to post message: ${e.message}")
-            promise.reject("POST_MESSAGE_ERROR", "Failed to post message: ${e.message}", e)
+            Log.e(TAG, "Failed to post binary message: ${e.message}")
+            promise.reject("POST_MESSAGE_ERROR", "Failed to post binary message: ${e.message}", e)
         }
     }
 

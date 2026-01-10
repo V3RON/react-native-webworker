@@ -417,13 +417,6 @@ export async function terminateWorker(workerId: string): Promise<boolean> {
   return NativeWebworker.terminateWorker(workerId);
 }
 
-export async function postMessage(
-  workerId: string,
-  message: string
-): Promise<boolean> {
-  return NativeWebworker.postMessage(workerId, message);
-}
-
 export async function evalScript(
   workerId: string,
   script: string

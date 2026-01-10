@@ -2,11 +2,6 @@ import type { TurboModule, CodegenTypes } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
 
 // Event payload types
-export type WorkerMessageEvent = {
-  workerId: string;
-  message: string;
-};
-
 export type WorkerBinaryMessageEvent = {
   workerId: string;
   /** Base64 encoded structured clone data */
@@ -44,13 +39,8 @@ export interface Spec extends TurboModule {
   terminateWorker(workerId: string): Promise<boolean>;
 
   /**
-   * Post a message to a worker (legacy JSON string)
-   */
-  postMessage(workerId: string, message: string): Promise<boolean>;
-
-  /**
-   * Post a binary message to a worker (structured clone)
-   * @param data Base64 encoded binary data
+   * Post a message to a worker using structured clone algorithm
+   * @param data Base64 encoded binary data from structured clone serialization
    */
   postMessageBinary(workerId: string, data: string): Promise<boolean>;
 
@@ -60,12 +50,7 @@ export interface Spec extends TurboModule {
   evalScript(workerId: string, script: string): Promise<string>;
 
   /**
-   * Event emitted when a worker posts a message to the host
-   */
-  readonly onWorkerMessage: CodegenTypes.EventEmitter<WorkerMessageEvent>;
-
-  /**
-   * Event emitted when a worker posts a binary message (structured clone)
+   * Event emitted when a worker posts a message using structured clone
    */
   readonly onWorkerBinaryMessage: CodegenTypes.EventEmitter<WorkerBinaryMessageEvent>;
 

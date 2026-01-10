@@ -47,22 +47,6 @@
     }
   });
 
-  // Legacy message callback - for backwards compatibility if needed
-  _core->setMessageCallback([weakSelf](const std::string &workerId,
-                                       const std::string &message) {
-    Webworker *strongSelf = weakSelf;
-    if (strongSelf) {
-      NSString *workerIdStr = [NSString stringWithUTF8String:workerId.c_str()];
-      NSString *messageStr = [NSString stringWithUTF8String:message.c_str()];
-      dispatch_async(dispatch_get_main_queue(), ^{
-        [strongSelf emitOnWorkerMessage:@{
-          @"workerId" : workerIdStr,
-          @"message" : messageStr
-        }];
-      });
-    }
-  });
-
   // Console callback - called for worker console.log/error/etc
   _core->setConsoleCallback([weakSelf](const std::string &workerId,
                                        const std::string &level,
@@ -114,8 +98,7 @@
 
 - (NSArray<NSString *> *)supportedEvents {
   return @[
-    @"onWorkerMessage", @"onWorkerBinaryMessage", @"onWorkerConsole",
-    @"onWorkerError"
+    @"onWorkerBinaryMessage", @"onWorkerConsole", @"onWorkerError"
   ];
 }
 
@@ -196,28 +179,6 @@ RCT_EXPORT_METHOD(terminateWorker : (NSString *)workerId resolve : (
         dispatch_async(dispatch_get_main_queue(), ^{
           resolve(@(success));
         });
-      });
-}
-
-RCT_EXPORT_METHOD(postMessage : (NSString *)workerId message : (NSString *)
-                      message resolve : (RCTPromiseResolveBlock)
-                          resolve reject : (RCTPromiseRejectBlock)reject) {
-
-  dispatch_async(
-      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        try {
-          bool success = self->_core->postMessage([workerId UTF8String],
-                                                  [message UTF8String]);
-
-          dispatch_async(dispatch_get_main_queue(), ^{
-            resolve(@(success));
-          });
-        } catch (const std::exception &e) {
-          NSString *errorMsg = [NSString stringWithUTF8String:e.what()];
-          dispatch_async(dispatch_get_main_queue(), ^{
-            reject(@"POST_MESSAGE_ERROR", errorMsg, nil);
-          });
-        }
       });
 }
 

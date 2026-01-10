@@ -20,7 +20,6 @@
 static std::shared_ptr<webworker::WebWorkerCore> gCore;
 static JavaVM* gJavaVM = nullptr;
 static jobject gCallbackRef = nullptr;
-static jmethodID gOnMessageMethod = nullptr;
 static jmethodID gOnBinaryMessageMethod = nullptr;
 static jmethodID gOnErrorMethod = nullptr;
 static jmethodID gOnConsoleMethod = nullptr;
@@ -75,28 +74,6 @@ static void setupCallbacks() {
         if (jData != nullptr) {
             env->DeleteLocalRef(jData);
         }
-
-        if (env->ExceptionCheck()) {
-            env->ExceptionDescribe();
-            env->ExceptionClear();
-        }
-    });
-
-    // Legacy message callback (for backwards compatibility, if needed)
-    gCore->setMessageCallback([](const std::string& workerId, const std::string& message) {
-        JNIEnv* env = getJNIEnv();
-        if (env == nullptr || gCallbackRef == nullptr || gOnMessageMethod == nullptr) {
-            LOGE("Cannot invoke onMessage callback - JNI not ready");
-            return;
-        }
-
-        jstring jWorkerId = env->NewStringUTF(workerId.c_str());
-        jstring jMessage = env->NewStringUTF(message.c_str());
-
-        env->CallVoidMethod(gCallbackRef, gOnMessageMethod, jWorkerId, jMessage);
-
-        env->DeleteLocalRef(jWorkerId);
-        env->DeleteLocalRef(jMessage);
 
         if (env->ExceptionCheck()) {
             env->ExceptionDescribe();
@@ -188,7 +165,6 @@ Java_com_webworker_WebWorkerNative_nativeInit(
         gCallbackRef = env->NewGlobalRef(callback);
 
         jclass callbackClass = env->GetObjectClass(callback);
-        gOnMessageMethod = env->GetMethodID(callbackClass, "onMessage", "(Ljava/lang/String;Ljava/lang/String;)V");
         gOnBinaryMessageMethod = env->GetMethodID(callbackClass, "onBinaryMessage", "(Ljava/lang/String;[B)V");
         gOnErrorMethod = env->GetMethodID(callbackClass, "onError", "(Ljava/lang/String;Ljava/lang/String;)V");
         gOnConsoleMethod = env->GetMethodID(callbackClass, "onConsole", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
@@ -249,24 +225,6 @@ Java_com_webworker_WebWorkerNative_nativeTerminateWorker(
         LOGI("Terminated worker: %s", id.c_str());
     }
 
-    return success ? JNI_TRUE : JNI_FALSE;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_com_webworker_WebWorkerNative_nativePostMessage(
-    JNIEnv* env,
-    jobject thiz,
-    jstring workerId,
-    jstring message
-) {
-    if (!gCore) {
-        return JNI_FALSE;
-    }
-
-    std::string id = jstringToString(env, workerId);
-    std::string msg = jstringToString(env, message);
-
-    bool success = gCore->postMessage(id, msg);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -338,7 +296,6 @@ Java_com_webworker_WebWorkerNative_nativeCleanup(
         gCallbackRef = nullptr;
     }
 
-    gOnMessageMethod = nullptr;
     gOnBinaryMessageMethod = nullptr;
     gOnErrorMethod = nullptr;
     gOnConsoleMethod = nullptr;
