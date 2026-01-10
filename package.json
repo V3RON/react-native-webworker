@@ -37,6 +37,9 @@
     "prepare": "bob build",
     "typecheck": "tsc",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "format:cpp": "./scripts/clang-format.sh",
+    "format:kotlin": "./scripts/kotlin-format.sh",
+    "format:js": "./scripts/js-format.sh",
     "test": "jest",
     "release": "release-it --only-version"
   },
