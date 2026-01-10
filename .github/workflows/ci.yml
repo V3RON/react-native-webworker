@@ -14,6 +14,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Android emulator configuration
+  ANDROID_API_LEVEL: '35'
+  ANDROID_ARCH: 'x86_64'
+  ANDROID_PROFILE: 'pixel_6'
+  ANDROID_AVD_NAME: 'Pixel_8_API_35'
+  # iOS simulator configuration
+  IOS_DEVICE_MODEL: 'iPhone 16 Pro'
+  IOS_VERSION: '18.2'
+  XCODE_VERSION: '16.3'
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -102,11 +113,17 @@ jobs:
         run: |
           yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}"
 
+      - name: Upload Android APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-apk
+          path: example/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 1
+
   build-ios:
     runs-on: macos-latest
 
     env:
-      XCODE_VERSION: 16.3
       TURBO_CACHE_DIR: .turbo/ios
       RCT_USE_RN_DEP: 1
       RCT_USE_PREBUILT_RNCORE: 1
@@ -151,3 +168,122 @@ jobs:
       - name: Build example for iOS
         run: |
           yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
+
+      - name: Upload iOS App
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-app
+          path: example/ios/build/Build/Products/Debug-iphonesimulator/WebworkerExample.app
+          retention-days: 1
+
+  harness-android:
+    name: Harness Android
+    needs: build-android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Reclaim disk space
+        uses: AdityaGarg8/remove-unwanted-software@v5
+        with:
+          remove-dotnet: true
+          remove-haskell: true
+          remove-codeql: true
+          remove-docker-images: true
+
+      - name: Download Android APK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: android-apk
+          path: example/android/app/build/outputs/apk/debug
+
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls /dev/kvm
+
+      - name: AVD cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ env.ANDROID_API_LEVEL }}-${{ env.ANDROID_ARCH }}
+
+      - name: Create AVD and generate snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ env.ANDROID_API_LEVEL }}
+          arch: ${{ env.ANDROID_ARCH }}
+          profile: ${{ env.ANDROID_PROFILE }}
+          disk-size: 1G
+          heap-size: 1G
+          force-avd-creation: false
+          avd-name: ${{ env.ANDROID_AVD_NAME }}
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: echo "Generated AVD snapshot for caching."
+
+      - name: Run Harness E2E tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          working-directory: example
+          api-level: ${{ env.ANDROID_API_LEVEL }}
+          arch: ${{ env.ANDROID_ARCH }}
+          force-avd-creation: false
+          avd-name: ${{ env.ANDROID_AVD_NAME }}
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r "./android/app/build/outputs/apk/debug/app-debug.apk"
+            yarn test:harness:android
+
+  harness-ios:
+    name: Harness iOS
+    needs: build-ios
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Use appropriate Xcode version
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Download iOS App
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ios-app
+          path: example/ios/build/Build/Products/Debug-iphonesimulator
+
+      - name: Setup iOS Simulator
+        uses: futureware-tech/simulator-action@v4
+        with:
+          model: ${{ env.IOS_DEVICE_MODEL }}
+          os: iOS
+          os_version: ${{ env.IOS_VERSION }}
+          wait_for_boot: true
+          erase_before_boot: false
+
+      - name: Install app on simulator
+        run: |
+          xcrun simctl install booted example/ios/build/Build/Products/Debug-iphonesimulator/WebworkerExample.app
+
+      - name: Run Harness E2E tests
+        working-directory: example
+        run: |
+          yarn test:harness:ios
