@@ -7,6 +7,12 @@ export type WorkerMessageEvent = {
   message: string;
 };
 
+export type WorkerBinaryMessageEvent = {
+  workerId: string;
+  /** Base64 encoded structured clone data */
+  data: string;
+};
+
 export type WorkerConsoleEvent = {
   workerId: string;
   level: string;
@@ -38,9 +44,15 @@ export interface Spec extends TurboModule {
   terminateWorker(workerId: string): Promise<boolean>;
 
   /**
-   * Post a message to a worker
+   * Post a message to a worker (legacy JSON string)
    */
   postMessage(workerId: string, message: string): Promise<boolean>;
+
+  /**
+   * Post a binary message to a worker (structured clone)
+   * @param data Base64 encoded binary data
+   */
+  postMessageBinary(workerId: string, data: string): Promise<boolean>;
 
   /**
    * Evaluate a script in a worker and return the result
@@ -51,6 +63,11 @@ export interface Spec extends TurboModule {
    * Event emitted when a worker posts a message to the host
    */
   readonly onWorkerMessage: CodegenTypes.EventEmitter<WorkerMessageEvent>;
+
+  /**
+   * Event emitted when a worker posts a binary message (structured clone)
+   */
+  readonly onWorkerBinaryMessage: CodegenTypes.EventEmitter<WorkerBinaryMessageEvent>;
 
   /**
    * Event emitted when a worker logs to console

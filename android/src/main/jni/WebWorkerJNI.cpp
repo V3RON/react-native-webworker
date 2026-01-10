@@ -21,6 +21,7 @@ static std::shared_ptr<webworker::WebWorkerCore> gCore;
 static JavaVM* gJavaVM = nullptr;
 static jobject gCallbackRef = nullptr;
 static jmethodID gOnMessageMethod = nullptr;
+static jmethodID gOnBinaryMessageMethod = nullptr;
 static jmethodID gOnErrorMethod = nullptr;
 static jmethodID gOnConsoleMethod = nullptr;
 
@@ -53,7 +54,35 @@ static JNIEnv* getJNIEnv() {
 static void setupCallbacks() {
     if (!gCore) return;
 
-    // Message callback - called when worker posts a message to host
+    // Binary message callback - called when worker posts a message using structured clone
+    gCore->setBinaryMessageCallback([](const std::string& workerId, const std::vector<uint8_t>& data) {
+        JNIEnv* env = getJNIEnv();
+        if (env == nullptr || gCallbackRef == nullptr || gOnBinaryMessageMethod == nullptr) {
+            LOGE("Cannot invoke onBinaryMessage callback - JNI not ready");
+            return;
+        }
+
+        jstring jWorkerId = env->NewStringUTF(workerId.c_str());
+        jbyteArray jData = env->NewByteArray(static_cast<jsize>(data.size()));
+        if (jData != nullptr && !data.empty()) {
+            env->SetByteArrayRegion(jData, 0, static_cast<jsize>(data.size()),
+                                    reinterpret_cast<const jbyte*>(data.data()));
+        }
+
+        env->CallVoidMethod(gCallbackRef, gOnBinaryMessageMethod, jWorkerId, jData);
+
+        env->DeleteLocalRef(jWorkerId);
+        if (jData != nullptr) {
+            env->DeleteLocalRef(jData);
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+    });
+
+    // Legacy message callback (for backwards compatibility, if needed)
     gCore->setMessageCallback([](const std::string& workerId, const std::string& message) {
         JNIEnv* env = getJNIEnv();
         if (env == nullptr || gCallbackRef == nullptr || gOnMessageMethod == nullptr) {
@@ -160,10 +189,11 @@ Java_com_webworker_WebWorkerNative_nativeInit(
 
         jclass callbackClass = env->GetObjectClass(callback);
         gOnMessageMethod = env->GetMethodID(callbackClass, "onMessage", "(Ljava/lang/String;Ljava/lang/String;)V");
+        gOnBinaryMessageMethod = env->GetMethodID(callbackClass, "onBinaryMessage", "(Ljava/lang/String;[B)V");
         gOnErrorMethod = env->GetMethodID(callbackClass, "onError", "(Ljava/lang/String;Ljava/lang/String;)V");
         gOnConsoleMethod = env->GetMethodID(callbackClass, "onConsole", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
 
-        if (gOnMessageMethod == nullptr || gOnErrorMethod == nullptr || gOnConsoleMethod == nullptr) {
+        if (gOnBinaryMessageMethod == nullptr || gOnErrorMethod == nullptr || gOnConsoleMethod == nullptr) {
             LOGE("Failed to get callback method IDs");
         }
     }
@@ -240,6 +270,30 @@ Java_com_webworker_WebWorkerNative_nativePostMessage(
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_webworker_WebWorkerNative_nativePostMessageBinary(
+    JNIEnv* env,
+    jobject thiz,
+    jstring workerId,
+    jbyteArray data
+) {
+    if (!gCore) {
+        return JNI_FALSE;
+    }
+
+    std::string id = jstringToString(env, workerId);
+
+    // Convert jbyteArray to std::vector<uint8_t>
+    jsize length = env->GetArrayLength(data);
+    std::vector<uint8_t> binaryData(static_cast<size_t>(length));
+    if (length > 0) {
+        env->GetByteArrayRegion(data, 0, length, reinterpret_cast<jbyte*>(binaryData.data()));
+    }
+
+    bool success = gCore->postMessageBinary(id, binaryData);
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_webworker_WebWorkerNative_nativeEvalScript(
     JNIEnv* env,
@@ -285,6 +339,7 @@ Java_com_webworker_WebWorkerNative_nativeCleanup(
     }
 
     gOnMessageMethod = nullptr;
+    gOnBinaryMessageMethod = nullptr;
     gOnErrorMethod = nullptr;
     gOnConsoleMethod = nullptr;
 }

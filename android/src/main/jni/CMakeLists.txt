@@ -15,6 +15,8 @@ set(SHARED_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../cpp")
 set(SHARED_SOURCES
     ${SHARED_CPP_DIR}/WebWorkerCore.cpp
     ${SHARED_CPP_DIR}/TaskQueue.cpp
+    ${SHARED_CPP_DIR}/StructuredClone/StructuredCloneWriter.cpp
+    ${SHARED_CPP_DIR}/StructuredClone/StructuredCloneReader.cpp
 )
 
 # Platform-specific JNI wrapper

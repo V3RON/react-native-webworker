@@ -14,6 +14,7 @@
 #include <condition_variable>
 
 #include "TaskQueue.h"
+#include "StructuredClone/StructuredCloneTypes.h"
 
 namespace webworker {
 
@@ -37,6 +38,11 @@ using ConsoleCallback = std::function<void(const std::string& workerId, const st
 using ErrorCallback = std::function<void(const std::string& workerId, const std::string& error)>;
 
 /**
+ * Callback type for structured clone messages (binary data)
+ */
+using BinaryMessageCallback = std::function<void(const std::string& workerId, const std::vector<uint8_t>& data)>;
+
+/**
  * WebWorkerCore - Platform-independent worker manager
  *
  * This is the shared C++ core that manages all web workers.
@@ -54,10 +60,12 @@ public:
 
     // Communication
     bool postMessage(const std::string& workerId, const std::string& message);
+    bool postMessageBinary(const std::string& workerId, const std::vector<uint8_t>& data);
     std::string evalScript(const std::string& workerId, const std::string& script);
 
     // Callbacks
     void setMessageCallback(MessageCallback callback);
+    void setBinaryMessageCallback(BinaryMessageCallback callback);
     void setConsoleCallback(ConsoleCallback callback);
     void setErrorCallback(ErrorCallback callback);
 
@@ -70,6 +78,7 @@ private:
     mutable std::mutex workersMutex_;
 
     MessageCallback messageCallback_;
+    BinaryMessageCallback binaryMessageCallback_;
     ConsoleCallback consoleCallback_;
     ErrorCallback errorCallback_;
 };
@@ -86,6 +95,7 @@ class WorkerRuntime {
 public:
     WorkerRuntime(const std::string& workerId,
                   MessageCallback messageCallback,
+                  BinaryMessageCallback binaryMessageCallback,
                   ConsoleCallback consoleCallback,
                   ErrorCallback errorCallback);
     ~WorkerRuntime();
@@ -96,6 +106,7 @@ public:
 
     // Messaging
     bool postMessage(const std::string& message);
+    bool postMessageBinary(const std::vector<uint8_t>& data);
 
     // Lifecycle
     void terminate();
@@ -119,6 +130,7 @@ private:
 
     // Message handling (called from native functions)
     void handlePostMessageToHost(const std::string& message);
+    void handleBinaryMessageToHost(const std::vector<uint8_t>& data);
     void handleConsoleLog(const std::string& level, const std::string& message);
 
     // Timer management
@@ -156,6 +168,7 @@ private:
 
     // Callbacks
     MessageCallback messageCallback_;
+    BinaryMessageCallback binaryMessageCallback_;
     ConsoleCallback consoleCallback_;
     ErrorCallback errorCallback_;
 };

@@ -1,6 +1,7 @@
 #include "WebWorkerCore.h"
-#include <iostream>
-#include <sstream>
+#include "StructuredClone/StructuredCloneWriter.h"
+#include "StructuredClone/StructuredCloneReader.h"
+#include "StructuredClone/StructuredCloneError.h"
 #include <chrono>
 
 namespace webworker {
@@ -11,6 +12,7 @@ namespace webworker {
 
 WebWorkerCore::WebWorkerCore()
     : messageCallback_(nullptr)
+    , binaryMessageCallback_(nullptr)
     , consoleCallback_(nullptr)
     , errorCallback_(nullptr) {
 }
@@ -32,6 +34,7 @@ std::string WebWorkerCore::createWorker(
     auto worker = std::make_unique<WorkerRuntime>(
         workerId,
         messageCallback_,
+        binaryMessageCallback_,
         consoleCallback_,
         errorCallback_
     );
@@ -80,6 +83,20 @@ bool WebWorkerCore::postMessage(
     return it->second->postMessage(message);
 }
 
+bool WebWorkerCore::postMessageBinary(
+    const std::string& workerId,
+    const std::vector<uint8_t>& data
+) {
+    std::lock_guard<std::mutex> lock(workersMutex_);
+
+    auto it = workers_.find(workerId);
+    if (it == workers_.end() || !it->second->isRunning()) {
+        return false;
+    }
+
+    return it->second->postMessageBinary(data);
+}
+
 std::string WebWorkerCore::evalScript(
     const std::string& workerId,
     const std::string& script
@@ -96,6 +113,10 @@ std::string WebWorkerCore::evalScript(
 
 void WebWorkerCore::setMessageCallback(MessageCallback callback) {
     messageCallback_ = callback;
+}
+
+void WebWorkerCore::setBinaryMessageCallback(BinaryMessageCallback callback) {
+    binaryMessageCallback_ = callback;
 }
 
 void WebWorkerCore::setConsoleCallback(ConsoleCallback callback) {
@@ -124,11 +145,13 @@ bool WebWorkerCore::isWorkerRunning(const std::string& workerId) const {
 WorkerRuntime::WorkerRuntime(
     const std::string& workerId,
     MessageCallback messageCallback,
+    BinaryMessageCallback binaryMessageCallback,
     ConsoleCallback consoleCallback,
     ErrorCallback errorCallback
 )
     : workerId_(workerId)
     , messageCallback_(messageCallback)
+    , binaryMessageCallback_(binaryMessageCallback)
     , consoleCallback_(consoleCallback)
     , errorCallback_(errorCallback) {
 
@@ -296,11 +319,9 @@ void WorkerRuntime::setupGlobalScope() {
 
             self.onmessage = null;
 
-            // postMessage - sends messages to the host
+            // postMessage - sends messages to the host using structured clone
             self.postMessage = function(message) {
-                if (typeof __nativePostMessageToHost !== 'undefined') {
-                    __nativePostMessageToHost(JSON.stringify(message));
-                }
+                __nativePostMessageStructured(message);
             };
 
             // addEventListener
@@ -320,15 +341,8 @@ void WorkerRuntime::setupGlobalScope() {
                 }
             };
 
-            // Internal message handler (called from native)
-            self.__handleMessage = function(message) {
-                var data;
-                try {
-                    data = JSON.parse(message);
-                } catch (e) {
-                    data = message;
-                }
-
+            // Internal message handler (called from native with deserialized data)
+            self.__handleMessage = function(data) {
                 var event = {
                     data: data,
                     type: 'message'
@@ -421,20 +435,26 @@ void WorkerRuntime::installNativeFunctions() {
         // Capture this pointer for callbacks
         auto* self = this;
 
-        // __nativePostMessageToHost
-        auto postMessageFunc = Function::createFromHostFunction(
+        // __nativePostMessageStructured - uses structured clone algorithm
+        auto postMessageStructuredFunc = Function::createFromHostFunction(
             runtime,
-            PropNameID::forAscii(runtime, "__nativePostMessageToHost"),
+            PropNameID::forAscii(runtime, "__nativePostMessageStructured"),
             1,
             [self](Runtime& rt, const Value& thisVal, const Value* args, size_t count) -> Value {
-                if (count > 0 && args[0].isString()) {
-                    std::string message = args[0].asString(rt).utf8(rt);
-                    self->handlePostMessageToHost(message);
+                if (count > 0) {
+                    try {
+                        // Serialize using structured clone
+                        SerializedData data = StructuredCloneWriter::serialize(rt, args[0]);
+                        self->handleBinaryMessageToHost(data.buffer);
+                    } catch (const DataCloneError& e) {
+                        // Throw the error back to JavaScript
+                        throw JSError(rt, e.what());
+                    }
                 }
                 return Value::undefined();
             }
         );
-        runtime.global().setProperty(runtime, "__nativePostMessageToHost", postMessageFunc);
+        runtime.global().setProperty(runtime, "__nativePostMessageStructured", postMessageStructuredFunc);
 
         // __nativeConsoleLog
         auto consoleLogFunc = Function::createFromHostFunction(
@@ -689,6 +709,12 @@ void WorkerRuntime::handlePostMessageToHost(const std::string& message) {
     }
 }
 
+void WorkerRuntime::handleBinaryMessageToHost(const std::vector<uint8_t>& data) {
+    if (binaryMessageCallback_) {
+        binaryMessageCallback_(workerId_, data);
+    }
+}
+
 void WorkerRuntime::handleConsoleLog(const std::string& level, const std::string& message) {
     if (consoleCallback_) {
         consoleCallback_(workerId_, level, message);
@@ -748,6 +774,48 @@ bool WorkerRuntime::postMessage(const std::string& message) {
         if (handleMessageProp.isObject() && handleMessageProp.asObject(runtime).isFunction(runtime)) {
             auto handleMessage = handleMessageProp.asObject(runtime).asFunction(runtime);
             handleMessage.call(runtime, String::createFromUtf8(runtime, message));
+        }
+    };
+
+    taskQueue_.enqueue(std::move(task));
+    return true;
+}
+
+bool WorkerRuntime::postMessageBinary(const std::vector<uint8_t>& data) {
+    if (!running_.load()) {
+        return false;
+    }
+
+    // Copy the data to ensure it survives until the task executes
+    std::vector<uint8_t> dataCopy = data;
+
+    // Create a message task and enqueue it
+    Task task;
+    task.type = TaskType::Message;
+    task.id = nextTaskId_++;
+    task.execute = [this, dataCopy = std::move(dataCopy)]() {
+        if (!hermesRuntime_ || !running_.load()) {
+            return;
+        }
+
+        Runtime& runtime = *hermesRuntime_;
+
+        try {
+            // Deserialize the binary data to a JavaScript value
+            Value deserializedValue = StructuredCloneReader::deserialize(
+                runtime, dataCopy.data(), dataCopy.size());
+
+            // Call __handleMessage with the deserialized value
+            auto handleMessageProp = runtime.global().getProperty(runtime, "__handleMessage");
+
+            if (handleMessageProp.isObject() && handleMessageProp.asObject(runtime).isFunction(runtime)) {
+                auto handleMessage = handleMessageProp.asObject(runtime).asFunction(runtime);
+                handleMessage.call(runtime, deserializedValue);
+            }
+        } catch (const DataCloneError& e) {
+            if (errorCallback_) {
+                errorCallback_(workerId_, "Deserialization error: " + std::string(e.what()));
+            }
         }
     };
 

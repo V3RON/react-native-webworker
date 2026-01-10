@@ -1,8 +1,36 @@
 import NativeWebworker, {
-  type WorkerMessageEvent,
+  type WorkerBinaryMessageEvent,
   type WorkerErrorEvent,
 } from './NativeWebworker';
 import type { EventSubscription } from 'react-native';
+import { decodeStructuredClone } from './StructuredCloneDecoder';
+import { encodeStructuredClone } from './StructuredCloneEncoder';
+
+/**
+ * Decode a base64 string to a Uint8Array
+ */
+function base64ToBytes(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
+ * Encode a Uint8Array to a base64 string
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary);
+}
+
+// Re-export DataCloneError
+export { DataCloneError } from './StructuredCloneEncoder';
 
 // Types
 export interface WorkerOptions {
@@ -32,7 +60,7 @@ export class Worker<TIn = unknown, TOut = unknown> {
   private _onmessage: MessageHandler<TOut> | null = null;
   private _onerror: ((error: Error) => void) | null = null;
   private initPromise: Promise<void>;
-  private messageSubscription: EventSubscription | null = null;
+  private binaryMessageSubscription: EventSubscription | null = null;
   private errorSubscription: EventSubscription | null = null;
 
   constructor(options: WorkerOptions) {
@@ -59,16 +87,20 @@ export class Worker<TIn = unknown, TOut = unknown> {
   }
 
   private setupEventListeners(): void {
-    // Listen for messages from this worker using CodegenTypes.EventEmitter
-    this.messageSubscription = NativeWebworker.onWorkerMessage(
-      (event: WorkerMessageEvent) => {
+    // Listen for binary messages from this worker using CodegenTypes.EventEmitter
+    this.binaryMessageSubscription = NativeWebworker.onWorkerBinaryMessage(
+      (event: WorkerBinaryMessageEvent) => {
         if (event.workerId === this.workerId && !this.isTerminated) {
           try {
-            const data = JSON.parse(event.message) as TOut;
+            // Decode base64 to bytes
+            const bytes = base64ToBytes(event.data);
+            // Decode structured clone format
+            const data = decodeStructuredClone(bytes) as TOut;
             this.dispatchMessage(data);
-          } catch {
-            // If parsing fails, dispatch the raw message
-            this.dispatchMessage(event.message as unknown as TOut);
+          } catch (error) {
+            if (this._onerror) {
+              this._onerror(error as Error);
+            }
           }
         }
       }
@@ -87,9 +119,9 @@ export class Worker<TIn = unknown, TOut = unknown> {
   }
 
   private cleanupEventListeners(): void {
-    if (this.messageSubscription) {
-      this.messageSubscription.remove();
-      this.messageSubscription = null;
+    if (this.binaryMessageSubscription) {
+      this.binaryMessageSubscription.remove();
+      this.binaryMessageSubscription = null;
     }
     if (this.errorSubscription) {
       this.errorSubscription.remove();
@@ -138,7 +170,10 @@ export class Worker<TIn = unknown, TOut = unknown> {
   }
 
   /**
-   * Post a message to the worker
+   * Post a message to the worker using structured clone algorithm.
+   * Supports complex types like Date, Map, Set, ArrayBuffer, etc.
+   *
+   * @throws DataCloneError if the message contains non-cloneable types (Function, Symbol, etc.)
    */
   async postMessage(message: TIn): Promise<void> {
     if (this.isTerminated) {
@@ -147,8 +182,10 @@ export class Worker<TIn = unknown, TOut = unknown> {
 
     await this.initPromise;
 
-    const serialized = JSON.stringify(message);
-    await NativeWebworker.postMessage(this.workerId, serialized);
+    // Encode using structured clone algorithm
+    const bytes = encodeStructuredClone(message);
+    const base64Data = bytesToBase64(bytes);
+    await NativeWebworker.postMessageBinary(this.workerId, base64Data);
   }
 
   /**
@@ -356,7 +393,7 @@ export { NativeWebworker };
 
 // Re-export event types
 export type {
-  WorkerMessageEvent,
+  WorkerBinaryMessageEvent,
   WorkerErrorEvent,
   WorkerConsoleEvent,
 } from './NativeWebworker';

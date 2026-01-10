@@ -27,7 +27,27 @@
 - (void)setupCallbacks {
   __weak Webworker *weakSelf = self;
 
-  // Message callback - called when worker posts a message to host
+  // Binary message callback - called when worker posts a message using
+  // structured clone
+  _core->setBinaryMessageCallback([weakSelf](const std::string &workerId,
+                                             const std::vector<uint8_t> &data) {
+    Webworker *strongSelf = weakSelf;
+    if (strongSelf) {
+      NSString *workerIdStr = [NSString stringWithUTF8String:workerId.c_str()];
+      NSData *binaryData = [NSData dataWithBytes:data.data()
+                                          length:data.size()];
+      // Convert to base64 for transmission over the bridge
+      NSString *base64Data = [binaryData base64EncodedStringWithOptions:0];
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [strongSelf emitOnWorkerBinaryMessage:@{
+          @"workerId" : workerIdStr,
+          @"data" : base64Data
+        }];
+      });
+    }
+  });
+
+  // Legacy message callback - for backwards compatibility if needed
   _core->setMessageCallback([weakSelf](const std::string &workerId,
                                        const std::string &message) {
     Webworker *strongSelf = weakSelf;
@@ -90,6 +110,13 @@
 
 + (BOOL)requiresMainQueueSetup {
   return NO;
+}
+
+- (NSArray<NSString *> *)supportedEvents {
+  return @[
+    @"onWorkerMessage", @"onWorkerBinaryMessage", @"onWorkerConsole",
+    @"onWorkerError"
+  ];
 }
 
 - (void)invalidate {
@@ -181,6 +208,44 @@ RCT_EXPORT_METHOD(postMessage : (NSString *)workerId message : (NSString *)
         try {
           bool success = self->_core->postMessage([workerId UTF8String],
                                                   [message UTF8String]);
+
+          dispatch_async(dispatch_get_main_queue(), ^{
+            resolve(@(success));
+          });
+        } catch (const std::exception &e) {
+          NSString *errorMsg = [NSString stringWithUTF8String:e.what()];
+          dispatch_async(dispatch_get_main_queue(), ^{
+            reject(@"POST_MESSAGE_ERROR", errorMsg, nil);
+          });
+        }
+      });
+}
+
+RCT_EXPORT_METHOD(postMessageBinary : (NSString *)workerId data : (NSString *)
+                      base64Data resolve : (RCTPromiseResolveBlock)
+                          resolve reject : (RCTPromiseRejectBlock)reject) {
+
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        try {
+          // Decode base64 data
+          NSData *binaryData =
+              [[NSData alloc] initWithBase64EncodedString:base64Data options:0];
+          if (binaryData == nil) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+              reject(@"DECODE_ERROR", @"Failed to decode base64 data", nil);
+            });
+            return;
+          }
+
+          // Convert to std::vector<uint8_t>
+          std::vector<uint8_t> dataVec(
+              static_cast<const uint8_t *>(binaryData.bytes),
+              static_cast<const uint8_t *>(binaryData.bytes) +
+                  binaryData.length);
+
+          bool success =
+              self->_core->postMessageBinary([workerId UTF8String], dataVec);
 
           dispatch_async(dispatch_get_main_queue(), ^{
             resolve(@(success));
