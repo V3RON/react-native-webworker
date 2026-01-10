@@ -6,7 +6,7 @@
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "start": "react-native start",
-    "build:android": "react-native build-android --tasks assembleDebug --extra-params \"--no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a\"",
+    "build:android": "react-native build-android --tasks assembleDebug --extra-params \"--no-daemon --console=plain -PreactNativeArchitectures=x86_64\"",
     "build:ios": "react-native build-ios --mode Debug --buildFolder build",
     "test:harness:ios": "react-native-harness --harnessRunner ios",
     "test:harness:android": "react-native-harness --harnessRunner android"
