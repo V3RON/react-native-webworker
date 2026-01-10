@@ -22,8 +22,8 @@ env:
   ANDROID_AVD_NAME: 'Pixel_8_API_35'
   # iOS simulator configuration
   IOS_DEVICE_MODEL: 'iPhone 17 Pro'
-  IOS_VERSION: '18.2'
-  XCODE_VERSION: '16.3'
+  IOS_VERSION: '26.0'
+  XCODE_VERSION: '26.1.1'
 
 jobs:
   lint:

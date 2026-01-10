@@ -24,7 +24,7 @@ const config = {
     }),
     applePlatform({
       name: 'ios',
-      device: appleSimulator('iPhone 17 Pro', '18.2'),
+      device: appleSimulator('iPhone 17 Pro', '26.0'),
       bundleId: 'webworker.example',
     }),
   ],
