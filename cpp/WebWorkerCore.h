@@ -14,6 +14,7 @@
 #include <condition_variable>
 
 #include "TaskQueue.h"
+#include "networking/FetchTypes.h"
 
 namespace webworker {
 
@@ -35,6 +36,11 @@ using ConsoleCallback = std::function<void(const std::string& workerId, const st
  * Callback type for worker errors
  */
 using ErrorCallback = std::function<void(const std::string& workerId, const std::string& error)>;
+
+/**
+ * Callback type for network requests
+ */
+using FetchCallback = std::function<void(const std::string& workerId, const FetchRequest& request)>;
 
 /**
  * WebWorkerCore - Platform-independent worker manager
@@ -60,6 +66,10 @@ public:
     void setMessageCallback(MessageCallback callback);
     void setConsoleCallback(ConsoleCallback callback);
     void setErrorCallback(ErrorCallback callback);
+    void setFetchCallback(FetchCallback callback);
+
+    // Networking
+    void handleFetchResponse(const std::string& workerId, const FetchResponse& response);
 
     // Query
     bool hasWorker(const std::string& workerId) const;
@@ -72,22 +82,19 @@ private:
     MessageCallback messageCallback_;
     ConsoleCallback consoleCallback_;
     ErrorCallback errorCallback_;
+    FetchCallback fetchCallback_;
 };
 
 /**
  * WorkerRuntime - Individual worker runtime with its own Hermes instance
- *
- * Each worker runs in its own thread with a dedicated Hermes runtime.
- * Implements proper event loop following the HTML specification model:
- * - Macrotasks: setTimeout, setInterval, postMessage, etc.
- * - Microtasks: Promise callbacks, queueMicrotask
  */
 class WorkerRuntime {
 public:
     WorkerRuntime(const std::string& workerId,
                   MessageCallback messageCallback,
                   ConsoleCallback consoleCallback,
-                  ErrorCallback errorCallback);
+                  ErrorCallback errorCallback,
+                  FetchCallback fetchCallback);
     ~WorkerRuntime();
 
     // Script execution
@@ -96,6 +103,9 @@ public:
 
     // Messaging
     bool postMessage(const std::string& message);
+
+    // Networking
+    void handleFetchResponse(const FetchResponse& response);
 
     // Lifecycle
     void terminate();
@@ -108,7 +118,7 @@ private:
     // Thread management
     void workerThreadMain();
 
-    // Event loop (replaces the old processMessageQueue)
+    // Event loop
     void eventLoop();
     void processTask(Task& task);
 
@@ -117,7 +127,7 @@ private:
     void installNativeFunctions();
     void installTimerFunctions();
 
-    // Message handling (called from native functions)
+    // Message handling
     void handlePostMessageToHost(const std::string& message);
     void handleConsoleLog(const std::string& level, const std::string& message);
 
@@ -142,8 +152,9 @@ private:
     TaskQueue taskQueue_;
     std::atomic<uint64_t> nextTaskId_{1};
     std::atomic<uint64_t> nextTimerId_{1};
+    std::atomic<uint64_t> nextRequestId_{1}; // For fetch requests
 
-    // Track cancelled timers for interval cleanup
+    // Track cancelled timers
     std::unordered_set<uint64_t> cancelledTimers_;
     std::mutex cancelledTimersMutex_;
 
@@ -158,6 +169,14 @@ private:
     MessageCallback messageCallback_;
     ConsoleCallback consoleCallback_;
     ErrorCallback errorCallback_;
+    FetchCallback fetchCallback_;
+
+    // Fetch promises
+    struct FetchPromise {
+        std::shared_ptr<Value> resolve;
+        std::shared_ptr<Value> reject;
+    };
+    std::unordered_map<std::string, FetchPromise> pendingFetches_;
 };
 
 } // namespace webworker

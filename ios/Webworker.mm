@@ -7,6 +7,7 @@
 
 #import "Webworker.h"
 #import "WebWorkerCore.h"
+#import "networking/FetchTypes.h"
 #import <memory>
 
 @interface Webworker () {
@@ -82,6 +83,82 @@
       });
     }
   });
+
+  // Fetch callback
+  _core->setFetchCallback([weakSelf](const std::string &workerId,
+                                     const webworker::FetchRequest &request) {
+    Webworker *strongSelf = weakSelf;
+    if (strongSelf) {
+        [strongSelf performFetch:request workerId:workerId];
+    }
+  });
+}
+
+- (void)performFetch:(const webworker::FetchRequest &)request workerId:(std::string)workerId {
+    NSString *urlString = [NSString stringWithUTF8String:request.url.c_str()];
+    NSURL *url = [NSURL URLWithString:urlString];
+    NSMutableURLRequest *urlRequest = [NSMutableURLRequest requestWithURL:url];
+    
+    urlRequest.HTTPMethod = [NSString stringWithUTF8String:request.method.c_str()];
+    
+    // Headers
+    for (const auto &header : request.headers) {
+        NSString *key = [NSString stringWithUTF8String:header.first.c_str()];
+        NSString *value = [NSString stringWithUTF8String:header.second.c_str()];
+        [urlRequest setValue:value forHTTPHeaderField:key];
+    }
+    
+    // Body
+    if (!request.body.empty()) {
+        urlRequest.HTTPBody = [NSData dataWithBytes:request.body.data() length:request.body.size()];
+    }
+
+    // Timeout
+    if (request.timeout > 0) {
+        urlRequest.timeoutInterval = request.timeout / 1000.0;
+    }
+    
+    std::string requestIdStr = request.requestId;
+    std::string workerIdStr = workerId;
+    
+    NSURLSession *session = [NSURLSession sharedSession];
+
+    // Handle redirect behavior via delegate if needed, but for now using shared session
+    // sharedSession automatically follows redirects. 
+    // If 'error' or 'manual' is requested, we would need a custom session delegate.
+    // For this MVP, we will only respect the timeout.
+    // TODO: Implement custom session delegate for redirect control if strictly required.
+    
+    NSURLSessionDataTask *task = [session dataTaskWithRequest:urlRequest completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+        
+        webworker::FetchResponse fetchResponse;
+        fetchResponse.requestId = requestIdStr;
+        
+        if (error) {
+            fetchResponse.error = [error.localizedDescription UTF8String];
+        } else {
+            NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+            fetchResponse.status = (int)httpResponse.statusCode;
+            
+            // Headers
+            for (NSString *key in httpResponse.allHeaderFields) {
+                NSString *value = httpResponse.allHeaderFields[key];
+                fetchResponse.headers[[key UTF8String]] = [value UTF8String];
+            }
+            
+            // Body
+            if (data) {
+                const uint8_t *bytes = (const uint8_t *)[data bytes];
+                fetchResponse.body.assign(bytes, bytes + [data length]);
+            }
+        }
+        
+        if (self->_core) {
+            self->_core->handleFetchResponse(workerIdStr, fetchResponse);
+        }
+    }];
+    
+    [task resume];
 }
 
 + (NSString *)moduleName {

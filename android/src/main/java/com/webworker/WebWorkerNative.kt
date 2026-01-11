@@ -35,6 +35,19 @@ object WebWorkerNative {
 
         /** Called for worker console output (log, error, warn, info) */
         fun onConsole(workerId: String, level: String, message: String)
+
+        /** Called for worker network requests */
+        fun onFetch(
+            workerId: String, 
+            requestId: String, 
+            url: String, 
+            method: String, 
+            headerKeys: Array<String>, 
+            headerValues: Array<String>, 
+            body: ByteArray?,
+            timeout: Double,
+            redirect: String
+        )
     }
 
     /**
@@ -101,6 +114,21 @@ object WebWorkerNative {
     }
 
     /**
+     * Send fetch response back to C++
+     */
+    fun handleFetchResponse(
+        workerId: String, 
+        requestId: String, 
+        status: Int, 
+        headerKeys: Array<String>, 
+        headerValues: Array<String>, 
+        body: ByteArray?, 
+        error: String?
+    ) {
+        nativeHandleFetchResponse(workerId, requestId, status, headerKeys, headerValues, body, error)
+    }
+
+    /**
      * Clean up all workers and release resources.
      */
     fun cleanup() {
@@ -119,4 +147,13 @@ object WebWorkerNative {
     private external fun nativeHasWorker(workerId: String): Boolean
     private external fun nativeIsWorkerRunning(workerId: String): Boolean
     private external fun nativeCleanup()
+    private external fun nativeHandleFetchResponse(
+        workerId: String, 
+        requestId: String, 
+        status: Int, 
+        headerKeys: Array<String>, 
+        headerValues: Array<String>, 
+        body: ByteArray?, 
+        error: String?
+    )
 }
