@@ -3,12 +3,27 @@
   "globalDependencies": [".nvmrc", ".yarnrc.yml"],
   "globalEnv": ["NODE_ENV"],
   "tasks": {
+    "build:polyfills": {
+      "inputs": [
+        "packages/polyfills/src/**",
+        "packages/polyfills/package.json",
+        "packages/polyfills/babel.config.js",
+        "packages/polyfills/scripts/**"
+      ],
+      "outputs": [
+        "packages/polyfills/dist/**",
+        "cpp/Polyfills.h"
+      ],
+      "cache": true
+    },
     "build:android": {
+      "dependsOn": ["build:polyfills"],
       "env": ["ANDROID_HOME", "ORG_GRADLE_PROJECT_newArchEnabled"],
       "inputs": [
         "package.json",
         "android",
         "!android/build",
+        "cpp",
         "src/*.ts",
         "src/*.tsx",
         "example/package.json",
@@ -20,6 +35,7 @@
       "outputs": []
     },
     "build:ios": {
+      "dependsOn": ["build:polyfills"],
       "env": [
         "RCT_NEW_ARCH_ENABLED",
         "RCT_REMOVE_LEGACY_ARCH",
@@ -30,6 +46,7 @@
         "package.json",
         "*.podspec",
         "ios",
+        "cpp",
         "src/*.ts",
         "src/*.tsx",
         "example/package.json",

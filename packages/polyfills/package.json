@@ -1,0 +1,31 @@
+{
+  "name": "@react-native-webworker/polyfills",
+  "description": "Polyfills for React Native WebWorker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.js && node scripts/generate-header.js"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@react-native/babel-preset": "^0.83.0",
+    "metro": "^0.83.0",
+    "metro-babel-transformer": "^0.83.0",
+    "metro-minify-terser": "^0.83.0",
+    "metro-resolver": "^0.83.0",
+    "abort-controller": "3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/V3RON/react-native-webworker.git"
+  },
+  "author": "Szymon Chmal <szymon@chmal.it> (https://github.com/V3RON)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/V3RON/react-native-webworker/issues"
+  },
+  "homepage": "https://github.com/V3RON/react-native-webworker#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  }
+}
