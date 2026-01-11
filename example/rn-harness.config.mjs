@@ -14,7 +14,7 @@ const config = {
   runners: [
     androidPlatform({
       name: 'android',
-      device: androidEmulator('Pixel_8_API_33', {
+      device: androidEmulator('Pixel_8_API_35', {
         apiLevel: 35,
         profile: 'pixel_6',
         diskSize: '1G',
@@ -24,7 +24,7 @@ const config = {
     }),
     applePlatform({
       name: 'ios',
-      device: appleSimulator('iPhone 16 Pro', '26.0'),
+      device: appleSimulator('iPhone 17 Pro', '26.0'),
       bundleId: 'webworker.example',
     }),
   ],
