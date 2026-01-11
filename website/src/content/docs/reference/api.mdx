@@ -1,0 +1,31 @@
+---
+title: API reference
+description: API documentation for react-native-webworker.
+---
+
+## `Worker`
+
+The primary class for creating a background thread.
+
+**Options:**
+- `script`: Inline JavaScript string to execute in the worker.
+- `scriptPath`: Path to a JavaScript file (Asset/Bundle).
+- `name`: Optional identifier for debugging.
+
+**Methods:**
+- `postMessage(data)`: Send data to the worker.
+- `terminate()`: Kill the worker thread immediately.
+- `addEventListener(type, handler)`: Listen for `message` events.
+
+## `WorkerPool`
+
+Manages a collection of workers to handle tasks in parallel.
+
+**Options:**
+- `size`: Number of workers to spawn.
+- `script` / `scriptPath`: The script each worker will run.
+
+**Methods:**
+- `run(tasks)`: Distributes an array of tasks and returns a promise that resolves with all results.
+- `broadcast(data)`: Sends the same message to all workers in the pool.
+- `terminate()`: Shuts down all workers in the pool.

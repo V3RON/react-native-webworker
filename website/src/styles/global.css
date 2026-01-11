@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+/* Load fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Starlight Theme Overrides - Matching Metro/Zinc Dark Theme */
+  
+  /* 
+     Starlight defaults to a blue-ish hue for its grays (Slate). 
+     We are overriding them with Zinc (Neutral Cool Gray) to match the landing page.
+  */
+  
+  /* Backgrounds */
+  --sl-color-black: #030303; /* Main background matching landing page */
+  --sl-color-bg-nav: #030303; /* Nav background */
+  --sl-color-bg-sidebar: #030303; /* Sidebar background */
+  --sl-color-bg-inline-code: #18181b; /* Zinc 900 */
+  --sl-color-bg-card: #09090b; /* Zinc 950 */
+
+  /* Text Colors - Strictly Zinc */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #f4f4f5; /* Zinc 100 - Main body text mostly maps here or gray-2 */
+  --sl-color-gray-2: #a1a1aa; /* Zinc 400 - Secondary text */
+  --sl-color-gray-3: #71717a; /* Zinc 500 */
+  --sl-color-gray-4: #3f3f46; /* Zinc 700 - Borders/Lines */
+  --sl-color-gray-5: #27272a; /* Zinc 800 */
+  --sl-color-gray-6: #18181b; /* Zinc 900 */
+
+  /* Accents */
+  /* 
+     The user mentioned "blueish" text was bad. 
+     We will switch the accent to White/Zinc-100 for a monochrome "Metro" look 
+     or a very subtle blue if absolutely necessary for focus states.
+     For now, we'll try a very clean monochrome look for the accent text,
+     possibly using the blue only for subtle indicators.
+  */
+  --sl-color-accent-low: #18181b; /* Zinc 900 - No blue tint in backgrounds */
+  --sl-color-accent: #ffffff; /* White accent - Metro style often uses white for active states */
+  --sl-color-accent-high: #f4f4f5; /* Zinc 100 */
+  
+  /* Links specifically */
+  --sl-color-text-accent: #ffffff; /* Make links white (or distinct if needed) */
+
+  /* Borders */
+  --sl-color-hairline-light: #27272a; /* Zinc 800 */
+  --sl-color-hairline: #18181b; /* Zinc 900 */
+
+  /* Fonts */
+  --sl-font-system: 'Inter', sans-serif;
+  --sl-font-mono: 'JetBrains Mono', monospace;
+  
+  /* Navbar */
+  --sl-nav-height: 4rem;
+}
+
+/* Global Styles */
+
+/* Custom scrollbar to match Landing Page */
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #3f3f46; /* Zinc 700 */
+    border-radius: 20px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #52525b; /* Zinc 600 */
+}
+
+/* Firefox support */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #3f3f46 transparent;
+}
+
+/* Ensure body background is consistent */
+body {
+    background-color: var(--sl-color-black);
+}
+
+/* Additional Specific Overrides for Starlight components if needed */
+
+/* Make the sidebar links gray by default, white on hover/active */
+:root[data-theme='dark'] .sl-sidebar a {
+    color: var(--sl-color-gray-2);
+}
+:root[data-theme='dark'] .sl-sidebar a:hover,
+:root[data-theme='dark'] .sl-sidebar a[aria-current="page"] {
+    color: var(--sl-color-white);
+    background-color: transparent; /* Remove default background if any */
+}
+
+/* Remove blueish tint from code blocks if present */
+:root[data-theme='dark'] .expressive-code {
+    --ec-brdRad: 0.5rem;
+    --ec-brdCol: var(--sl-color-gray-5);
+    --ec-bg: var(--sl-color-bg-card);
+}

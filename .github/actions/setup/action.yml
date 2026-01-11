@@ -34,3 +34,8 @@ runs:
           **/node_modules
           .yarn/install-state.gz
         key: ${{ steps.yarn-cache.outputs.cache-primary-key }}
+
+    - name: Sync Astro
+      working-directory: website
+      run: yarn astro sync
+      shell: bash

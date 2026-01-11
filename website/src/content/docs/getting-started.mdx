@@ -1,0 +1,106 @@
+---
+title: Getting started
+description: Learn how to install and use react-native-webworker.
+---
+
+## Introduction
+
+React Native's single-threaded nature means heavy JavaScript computations (data processing, encryption, complex logic) can freeze the UI, leading to dropped frames and a poor user experience.
+
+`react-native-webworker` fills the gap for **persistent, heavy background processing** using the standard Web Worker API.
+
+### Workers vs. worklets
+
+It is important to distinguish between **Worklets** (used by Reanimated, VisionCamera, etc.) and **Web Workers** (this library).
+
+| Feature | Worklets | Web Workers (This library) |
+| :--- | :--- | :--- |
+| **Primary Goal** | **Callbacks**: High-frequency, specialized logic (Animations, Sensors, Video). | **Computation**: Persistent offloading of CPU-intensive business logic. |
+| **Lifecycle** | **Short-lived**: Usually invoked for specific events or frames. | **Persistent**: Long-running threads that maintain internal state. |
+| **Execution** | Often tied to the UI thread or specific specialized threads. | True parallelism on dedicated background threads. |
+| **Standard** | Custom React Native concepts (Runtime/Worklet). | **W3C Web Standard** (`postMessage`, `onmessage`). |
+| **Compatibility** | Native-only. | **Isomorphic** (runs on Web and Native). |
+
+**Use `react-native-webworker` when:**
+- You need to process large datasets (filtering, sorting, mapping).
+- You are performing complex mathematical calculations or encryption.
+- You need code that runs exactly the same on React Native and the Web.
+- You need a persistent background task that manages its own state over time.
+
+## Web compatibility
+
+One of the core design goals of `react-native-webworker` is **isomorphic code**. The API is designed to strictly follow the [MDN Web Worker API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API).
+
+This means you can write your worker logic once and use it in:
+1.  **React Native** (Android & iOS via JSI)
+2.  **React Web** (Standard Browser Web Workers)
+
+```typescript
+// worker.js
+// This code works in the Browser AND React Native
+self.onmessage = (event) => {
+  const result = heavyCalculation(event.data);
+  self.postMessage(result);
+};
+```
+
+## Installation
+
+```bash
+npm install react-native-web-worker
+# or
+yarn add react-native-web-worker
+# or
+pnpm add react-native-web-worker
+# or
+bun add react-native-web-worker
+```
+
+## Usage
+
+### Basic worker
+
+Create a dedicated worker for a specific task.
+
+```typescript
+import { Worker } from 'react-native-webworker';
+
+const worker = new Worker({
+  script: `
+    onmessage = (e) => {
+      // Heavy computation here
+      const result = e.data * 2;
+      postMessage(result);
+    };
+  `
+});
+
+worker.onmessage = (e) => {
+  console.log('Result:', e.data);
+};
+
+worker.postMessage(42);
+```
+
+### Worker pool
+
+For parallelizing large datasets or multiple independent tasks.
+
+```typescript
+import { WorkerPool } from 'react-native-webworker';
+
+const pool = new WorkerPool({
+  size: 4, // Number of threads
+  script: `
+    onmessage = (e) => {
+      postMessage(e.data * e.data);
+    };
+  `
+});
+
+// Automatically distributes tasks across the pool
+const results = await pool.run([1, 2, 3, 4, 5]);
+console.log(results); // [1, 4, 9, 16, 25]
+
+await pool.terminate();
+```
