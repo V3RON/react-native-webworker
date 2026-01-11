@@ -228,16 +228,17 @@ describe('Worker Networking', () => {
       `,
     });
 
-    const createResponsePromise = () => new Promise<any>((resolve, reject) => {
-      worker.onmessage = (event) => {
-        if (event.data.status === 'error') {
-          reject(new Error(event.data.error));
-        } else {
-          resolve(event.data);
-        }
-      };
-      worker.onerror = reject;
-    });
+    const createResponsePromise = () =>
+      new Promise<any>((resolve, reject) => {
+        worker.onmessage = (event) => {
+          if (event.data.status === 'error') {
+            reject(new Error(event.data.error));
+          } else {
+            resolve(event.data);
+          }
+        };
+        worker.onerror = reject;
+      });
 
     // Test sending binary data
     let currentPromise = createResponsePromise();
@@ -302,7 +303,11 @@ describe('Worker Networking', () => {
 
     await worker.postMessage('start');
 
-    const result = await withTimeout(responsePromise, 5000, 'Timeout test failed');
+    const result = await withTimeout(
+      responsePromise,
+      5000,
+      'Timeout test failed'
+    );
     // Expect error string
     expect(typeof result).toBe('string');
     expect(result).not.toBe('Did not catch error');
