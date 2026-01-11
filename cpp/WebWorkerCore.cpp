@@ -484,12 +484,22 @@ void WorkerRuntime::installNativeFunctions() {
                 std::string method = "GET";
                 std::unordered_map<std::string, std::string> headers;
                 std::vector<uint8_t> bodyData;
+                double timeout = 0;
+                std::string redirect = "follow";
 
                 if (count > 1 && args[1].isObject()) {
                     Object opts = args[1].asObject(rt);
 
                     if (opts.hasProperty(rt, "method")) {
                         method = opts.getProperty(rt, "method").asString(rt).utf8(rt);
+                    }
+
+                    if (opts.hasProperty(rt, "timeout")) {
+                        timeout = opts.getProperty(rt, "timeout").asNumber();
+                    }
+
+                    if (opts.hasProperty(rt, "redirect")) {
+                         redirect = opts.getProperty(rt, "redirect").asString(rt).utf8(rt);
                     }
 
                     if (opts.hasProperty(rt, "headers")) {
@@ -520,7 +530,7 @@ void WorkerRuntime::installNativeFunctions() {
 
                 auto promiseCtor = rt.global().getPropertyAsFunction(rt, "Promise");
                 return promiseCtor.callAsConstructor(rt, Function::createFromHostFunction(rt, PropNameID::forAscii(rt, "executor"), 2,
-                    [self, requestId, url, method, headers, bodyData](Runtime& rt, const Value&, const Value* args, size_t) -> Value {
+                    [self, requestId, url, method, headers, bodyData, timeout, redirect](Runtime& rt, const Value&, const Value* args, size_t) -> Value {
                         auto resolve = std::make_shared<Value>(rt, args[0]);
                         auto reject = std::make_shared<Value>(rt, args[1]);
 
@@ -533,6 +543,8 @@ void WorkerRuntime::installNativeFunctions() {
                             req.method = method;
                             req.headers = headers;
                             req.body = bodyData;
+                            req.timeout = timeout;
+                            req.redirect = redirect;
                             self->fetchCallback_(self->workerId_, req);
                         }
                         return Value::undefined();

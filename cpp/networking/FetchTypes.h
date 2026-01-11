@@ -12,6 +12,8 @@ struct FetchRequest {
     std::string method;
     std::unordered_map<std::string, std::string> headers;
     std::vector<uint8_t> body;
+    double timeout;      // Request timeout in milliseconds (0 = default/no timeout)
+    std::string redirect; // "follow", "error", "manual"
 };
 
 struct FetchResponse {

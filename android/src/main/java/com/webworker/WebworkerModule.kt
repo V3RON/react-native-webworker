@@ -15,6 +15,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * React Native TurboModule for WebWorker support.
@@ -71,7 +72,9 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
         method: String,
         headerKeys: Array<String>,
         headerValues: Array<String>,
-        body: ByteArray?
+        body: ByteArray?,
+        timeout: Double,
+        redirect: String
     ) {
         val requestBuilder = Request.Builder()
             .url(url)
@@ -98,7 +101,25 @@ class WebworkerModule(reactContext: ReactApplicationContext) :
 
         requestBuilder.method(method, requestBody)
 
-        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+        // Configure client based on options
+        val requestClient = if (timeout > 0 || redirect != "follow") {
+             val builder = client.newBuilder()
+             if (timeout > 0) {
+                 val timeoutMs = timeout.toLong()
+                 builder.callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                 builder.readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                 builder.connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+             }
+             if (redirect == "error" || redirect == "manual") {
+                 builder.followRedirects(false)
+                 builder.followSslRedirects(false)
+             }
+             builder.build()
+        } else {
+             client
+        }
+
+        requestClient.newCall(requestBuilder.build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 WebWorkerNative.handleFetchResponse(
                     workerId, requestId, 0, emptyArray(), emptyArray(), null, e.message

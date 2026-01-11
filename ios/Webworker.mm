@@ -112,11 +112,24 @@
     if (!request.body.empty()) {
         urlRequest.HTTPBody = [NSData dataWithBytes:request.body.data() length:request.body.size()];
     }
+
+    // Timeout
+    if (request.timeout > 0) {
+        urlRequest.timeoutInterval = request.timeout / 1000.0;
+    }
     
     std::string requestIdStr = request.requestId;
     std::string workerIdStr = workerId;
     
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:urlRequest completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+    NSURLSession *session = [NSURLSession sharedSession];
+
+    // Handle redirect behavior via delegate if needed, but for now using shared session
+    // sharedSession automatically follows redirects. 
+    // If 'error' or 'manual' is requested, we would need a custom session delegate.
+    // For this MVP, we will only respect the timeout.
+    // TODO: Implement custom session delegate for redirect control if strictly required.
+    
+    NSURLSessionDataTask *task = [session dataTaskWithRequest:urlRequest completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
         
         webworker::FetchResponse fetchResponse;
         fetchResponse.requestId = requestIdStr;

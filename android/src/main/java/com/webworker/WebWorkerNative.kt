@@ -44,7 +44,9 @@ object WebWorkerNative {
             method: String, 
             headerKeys: Array<String>, 
             headerValues: Array<String>, 
-            body: ByteArray?
+            body: ByteArray?,
+            timeout: Double,
+            redirect: String
         )
     }
 

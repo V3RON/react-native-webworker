@@ -188,4 +188,123 @@ describe('Worker Networking', () => {
     expect(typeof result).toBe('string');
     expect(result).not.toBe('Did not catch error');
   });
+
+  it('should support binary data with ArrayBuffer', async () => {
+    worker = new Worker({
+      script: `
+        self.onmessage = async function(event) {
+          try {
+            const { action, data } = event.data;
+            if (action === 'send-binary') {
+              // Create an ArrayBuffer with some test data
+              const buffer = new ArrayBuffer(8);
+              const view = new Uint8Array(buffer);
+              view.set([1, 2, 3, 4, 5, 6, 7, 8]);
+
+              // Send as POST body
+              const response = await fetch('https://httpbin.org/post', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/octet-stream'
+                },
+                body: buffer
+              });
+
+              const result = await response.json();
+              self.postMessage({ status: 'ok', result: result });
+            } else if (action === 'receive-binary') {
+              // Fetch binary data
+              const response = await fetch('https://httpbin.org/bytes/8');
+              const arrayBuffer = await response.arrayBuffer();
+
+              // Convert to Uint8Array to check contents
+              const uint8Array = new Uint8Array(arrayBuffer);
+              self.postMessage({ status: 'ok', data: Array.from(uint8Array) });
+            }
+          } catch (e) {
+            self.postMessage({ status: 'error', error: e.toString() });
+          }
+        };
+      `,
+    });
+
+    const createResponsePromise = () => new Promise<any>((resolve, reject) => {
+      worker.onmessage = (event) => {
+        if (event.data.status === 'error') {
+          reject(new Error(event.data.error));
+        } else {
+          resolve(event.data);
+        }
+      };
+      worker.onerror = reject;
+    });
+
+    // Test sending binary data
+    let currentPromise = createResponsePromise();
+    await worker.postMessage({ action: 'send-binary', data: null });
+    let result = await withTimeout(
+      currentPromise,
+      10000,
+      'Binary send test timed out'
+    );
+
+    expect(result.result).toBeDefined();
+    expect(result.result.data).toBeDefined();
+    // httpbin.org returns the data as base64, so we just check it exists
+    expect(typeof result.result.data).toBe('string');
+
+    // Test receiving binary data
+    currentPromise = createResponsePromise();
+    await worker.postMessage({ action: 'receive-binary', data: null });
+    result = await withTimeout(
+      currentPromise,
+      10000,
+      'Binary receive test timed out'
+    );
+
+    expect(Array.isArray(result.data)).toBe(true);
+    expect(result.data.length).toBe(8);
+    // Should be random bytes, just check they're numbers
+    result.data.forEach((byte: number) => {
+      expect(typeof byte).toBe('number');
+      expect(byte).toBeGreaterThanOrEqual(0);
+      expect(byte).toBeLessThanOrEqual(255);
+    });
+  });
+
+  it('should support request timeout', async () => {
+    worker = new Worker({
+      script: `
+        self.onmessage = async function() {
+          try {
+            // Request a 2 second delay but set timeout to 100ms
+            await fetch('https://httpbin.org/delay/2', {
+              timeout: 100
+            });
+            self.postMessage({ status: 'ok', data: 'should fail' });
+          } catch (e) {
+            self.postMessage({ status: 'error', error: e.toString() });
+          }
+        };
+      `,
+    });
+
+    const responsePromise = new Promise<any>((resolve) => {
+      worker.onmessage = (event) => {
+        if (event.data.status === 'error') {
+          resolve(event.data.error);
+        } else {
+          resolve('Did not catch error');
+        }
+      };
+      worker.onerror = (err) => resolve(err);
+    });
+
+    await worker.postMessage('start');
+
+    const result = await withTimeout(responsePromise, 5000, 'Timeout test failed');
+    // Expect error string
+    expect(typeof result).toBe('string');
+    expect(result).not.toBe('Did not catch error');
+  });
 });

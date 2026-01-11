@@ -120,6 +120,8 @@ static void setupCallbacks() {
         jstring jRequestId = env->NewStringUTF(request.requestId.c_str());
         jstring jUrl = env->NewStringUTF(request.url.c_str());
         jstring jMethod = env->NewStringUTF(request.method.c_str());
+        jstring jRedirect = env->NewStringUTF(request.redirect.c_str());
+        jdouble jTimeout = (jdouble)request.timeout;
         
         jclass strClass = env->FindClass("java/lang/String");
         jobjectArray jHeaderKeys = env->NewObjectArray(request.headers.size(), strClass, nullptr);
@@ -142,12 +144,13 @@ static void setupCallbacks() {
             env->SetByteArrayRegion(jBody, 0, request.body.size(), (const jbyte*)request.body.data());
         }
 
-        env->CallVoidMethod(gCallbackRef, gOnFetchMethod, jWorkerId, jRequestId, jUrl, jMethod, jHeaderKeys, jHeaderValues, jBody);
+        env->CallVoidMethod(gCallbackRef, gOnFetchMethod, jWorkerId, jRequestId, jUrl, jMethod, jHeaderKeys, jHeaderValues, jBody, jTimeout, jRedirect);
 
         env->DeleteLocalRef(jWorkerId);
         env->DeleteLocalRef(jRequestId);
         env->DeleteLocalRef(jUrl);
         env->DeleteLocalRef(jMethod);
+        env->DeleteLocalRef(jRedirect);
         env->DeleteLocalRef(jHeaderKeys);
         env->DeleteLocalRef(jHeaderValues);
         if (jBody) env->DeleteLocalRef(jBody);
@@ -189,7 +192,7 @@ Java_com_webworker_WebWorkerNative_nativeInit(
         gOnMessageMethod = env->GetMethodID(callbackClass, "onMessage", "(Ljava/lang/String;Ljava/lang/String;)V");
         gOnErrorMethod = env->GetMethodID(callbackClass, "onError", "(Ljava/lang/String;Ljava/lang/String;)V");
         gOnConsoleMethod = env->GetMethodID(callbackClass, "onConsole", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-        gOnFetchMethod = env->GetMethodID(callbackClass, "onFetch", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[B)V");
+        gOnFetchMethod = env->GetMethodID(callbackClass, "onFetch", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[BDLjava/lang/String;)V");
     }
 
     setupCallbacks();
