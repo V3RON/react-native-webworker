@@ -1,4 +1,5 @@
 #include "WebWorkerCore.h"
+#include "Polyfills.h"
 #include "networking/ResponseHostObject.h"
 #include <iostream>
 #include <sstream>
@@ -303,6 +304,12 @@ void WorkerRuntime::setupGlobalScope() {
 
     try {
         Runtime& runtime = *hermesRuntime_;
+
+        // Execute polyfills first (TextEncoder, URL, AbortController, etc.)
+        runtime.evaluateJavaScript(
+            std::make_shared<StringBuffer>(kPolyfillScript),
+            "polyfills.js"
+        );
 
         std::string initScript = R"(
             var self = this;
