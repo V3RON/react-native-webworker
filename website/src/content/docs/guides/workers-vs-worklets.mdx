@@ -1,0 +1,27 @@
+---
+title: Workers vs. Worklets
+description: Understand the difference between Web Workers and Reanimated Worklets.
+---
+
+It is important to distinguish between **Worklets** (used by Reanimated, VisionCamera, etc.) and **Web Workers** (this library).
+
+| Feature | Worklets | Web Workers (This library) |
+| :--- | :--- | :--- |
+| **Primary Goal** | **Callbacks**: High-frequency, specialized logic (Animations, Sensors, Video). | **Computation**: Persistent offloading of CPU-intensive business logic. |
+| **Lifecycle** | **Short-lived**: Usually invoked for specific events or frames. | **Persistent**: Long-running threads that maintain internal state. |
+| **Execution** | Often tied to the UI thread or specific specialized threads. | True parallelism on dedicated background threads. |
+| **Standard** | Custom React Native concepts (Runtime/Worklet). | **W3C Web Standard** (`postMessage`, `onmessage`). |
+| **Compatibility** | Native-only. | **Isomorphic** (runs on Web and Native). |
+
+## When to use what?
+
+### Use `react-native-webworker` when:
+- You need to process large datasets (filtering, sorting, mapping).
+- You are performing complex mathematical calculations or encryption.
+- You need code that runs exactly the same on React Native and the Web.
+- You need a persistent background task that manages its own state over time.
+
+### Use Worklets when:
+- You are driving animations (Reanimated).
+- You are processing camera frames in real-time (VisionCamera).
+- You need synchronous communication with the UI thread for gesture handling.

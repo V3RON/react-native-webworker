@@ -1,0 +1,46 @@
+---
+title: Polyfills
+description: Understanding the built-in polyfills in react-native-webworker.
+---
+
+The `react-native-webworker` library includes built-in polyfills to provide essential web APIs that are missing from Hermes. Every worker automatically gets these polyfills loaded before your code runs.
+
+## Why are polyfills needed?
+
+Hermes is a lightweight JavaScript engine optimized for React Native, but it doesn't implement all the standard Web APIs that you might expect in a browser environment (like Chrome's V8 or Safari's JavaScriptCore).
+
+To ensure that standard libraries and isomorphic code work correctly, `react-native-webworker` injects a set of polyfills into the worker environment.
+
+## Included polyfills
+
+Currently, the following APIs are polyfilled:
+
+- **AbortController**: Allows you to abort asynchronous operations (like fetch requests).
+- **TextEncoder / TextDecoder**: For encoding and decoding strings to/from binary data.
+
+*(More polyfills will be added in future versions)*
+
+## Adding new polyfills
+
+If you are contributing to the library, you can extend the polyfill bundle by adding new APIs:
+
+1.  Install the polyfill package in `packages/polyfills`:
+    ```bash
+    cd packages/polyfills
+    yarn add text-encoding-polyfill
+    ```
+
+2.  Import it in the source file:
+    ```javascript
+    // packages/polyfills/src/index.js
+    import 'abort-controller/polyfill';
+    import 'text-encoding-polyfill';  // New polyfill
+    ```
+
+3.  Rebuild the polyfills:
+    ```bash
+    cd packages/polyfills
+    yarn build
+    ```
+
+The new polyfill will be automatically available in all workers.

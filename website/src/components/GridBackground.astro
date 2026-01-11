@@ -1,0 +1,173 @@
+<canvas id="bg-grid" class="absolute inset-0 w-full h-full z-0 opacity-40 pointer-events-none"></canvas>
+
+<script>
+  const canvas = document.getElementById('bg-grid');
+  const ctx = canvas.getContext('2d');
+  
+  // Vercel-like aesthetics: cleaner, thinner lines, subtle glowing beams
+  const GRID_SIZE = 60; // Larger grid for cleaner look
+  const BEAM_LENGTH = 150; // Longer beams
+  const BEAM_SPEED = 1.5; // Smooth, moderate speed
+  const MAX_BEAMS = 8; // Fewer beams for minimalism
+  
+  // Subtle gradient colors for beams
+  const COLORS = [
+    'rgba(255, 255, 255, 0.4)', // White-ish
+    'rgba(161, 161, 170, 0.4)', // Zinc-400
+  ];
+
+  let width = 0;
+  let height = 0;
+  
+  let beams = [];
+
+  function createBeam() {
+    const axis = Math.random() > 0.5 ? 'x' : 'y';
+    const direction = Math.random() > 0.5 ? 1 : -1;
+    
+    // Snap starting position to grid
+    const gridX = Math.floor(Math.random() * (width / GRID_SIZE)) * GRID_SIZE;
+    const gridY = Math.floor(Math.random() * (height / GRID_SIZE)) * GRID_SIZE;
+
+    // Start slightly off-screen based on direction
+    let startOffset = 0;
+    if (axis === 'x') {
+        startOffset = direction === 1 ? -BEAM_LENGTH : width + BEAM_LENGTH;
+    } else {
+        startOffset = direction === 1 ? -BEAM_LENGTH : height + BEAM_LENGTH;
+    }
+
+    return {
+      x: gridX,
+      y: gridY,
+      axis,
+      direction,
+      speed: BEAM_SPEED + Math.random() * 0.5, // Slight speed variation
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      offset: startOffset,
+      dead: false
+    };
+  }
+
+  function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    
+    // Initial population
+    for(let i=0; i<MAX_BEAMS; i++) {
+        beams.push(createBeam());
+        // Randomize initial positions so they don't all start at edge
+        const beam = beams[i];
+        if (beam.axis === 'x') beam.offset = Math.random() * width;
+        else beam.offset = Math.random() * height;
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  function resize() {
+    const parent = canvas.parentElement;
+    if (parent) {
+        width = parent.clientWidth;
+        height = parent.clientHeight;
+        canvas.width = width;
+        canvas.height = height;
+    }
+  }
+
+  function drawGrid() {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)'; // Very subtle grid
+    ctx.lineWidth = 1;
+    
+    ctx.beginPath();
+    // Vertical lines
+    // Center the grid
+    const offsetX = (width % GRID_SIZE) / 2;
+    const offsetY = (height % GRID_SIZE) / 2;
+
+    for (let x = offsetX; x <= width; x += GRID_SIZE) {
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, height);
+    }
+    // Horizontal lines
+    for (let y = offsetY; y <= height; y += GRID_SIZE) {
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(width, y + 0.5);
+    }
+    ctx.stroke();
+  }
+
+  function updateAndDrawBeams() {
+    // Manage population
+    if (beams.length < MAX_BEAMS && Math.random() < 0.02) {
+        beams.push(createBeam());
+    }
+
+    beams.forEach((beam, index) => {
+        // Update
+        beam.offset += beam.speed * beam.direction;
+
+        // Check bounds (kill if far off screen)
+        if (beam.axis === 'x') {
+            if ((beam.direction === 1 && beam.offset > width + BEAM_LENGTH) || 
+                (beam.direction === -1 && beam.offset < -BEAM_LENGTH)) {
+                beam.dead = true;
+            }
+        } else {
+             if ((beam.direction === 1 && beam.offset > height + BEAM_LENGTH) || 
+                (beam.direction === -1 && beam.offset < -BEAM_LENGTH)) {
+                beam.dead = true;
+            }
+        }
+
+        // Draw
+        if (!beam.dead) {
+            const gradient = ctx.createLinearGradient(
+                beam.axis === 'x' ? beam.offset : beam.x,
+                beam.axis === 'y' ? beam.offset : beam.y,
+                beam.axis === 'x' ? beam.offset - (BEAM_LENGTH * beam.direction) : beam.x,
+                beam.axis === 'y' ? beam.offset - (BEAM_LENGTH * beam.direction) : beam.y
+            );
+            
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+            gradient.addColorStop(0.5, beam.color); // Middle is brightest
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            ctx.lineWidth = 2; // Slightly thicker beam
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = gradient;
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.2)';
+            ctx.shadowBlur = 10;
+
+            ctx.beginPath();
+            if (beam.axis === 'x') {
+                const y = beam.y + 0.5 + (height % GRID_SIZE) / 2; // Align to grid
+                ctx.moveTo(beam.offset, y);
+                ctx.lineTo(beam.offset - (BEAM_LENGTH * beam.direction), y);
+            } else {
+                const x = beam.x + 0.5 + (width % GRID_SIZE) / 2; // Align to grid
+                ctx.moveTo(x, beam.offset);
+                ctx.lineTo(x, beam.offset - (BEAM_LENGTH * beam.direction));
+            }
+            ctx.stroke();
+            
+            // Reset shadow for grid
+            ctx.shadowBlur = 0;
+        }
+    });
+
+    // Cleanup dead beams
+    beams = beams.filter(b => !b.dead);
+  }
+
+  function loop() {
+    ctx.clearRect(0, 0, width, height);
+    
+    drawGrid();
+    updateAndDrawBeams();
+    
+    requestAnimationFrame(loop);
+  }
+
+  init();
+</script>

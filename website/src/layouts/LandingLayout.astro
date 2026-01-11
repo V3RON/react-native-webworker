@@ -1,0 +1,76 @@
+---
+import '../styles/global.css';
+
+interface Props {
+	title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="description" content="True Multithreading for React Native. Run standard Web Workers with full access to Native Modules and JSI." />
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="generator" content={Astro.generator} />
+		<link rel="preconnect" href="https://fonts.googleapis.com">
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+		<title>{title}</title>
+
+        <!-- Open Graph / Facebook -->
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={Astro.url} />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content="True Multithreading for React Native. Run standard Web Workers with full access to Native Modules and JSI." />
+        <meta property="og:image" content="/favicon.svg" />
+
+        <!-- Twitter -->
+        <meta property="twitter:card" content="summary_large_image" />
+        <meta property="twitter:url" content={Astro.url} />
+        <meta property="twitter:title" content={title} />
+        <meta property="twitter:description" content="True Multithreading for React Native. Run standard Web Workers with full access to Native Modules and JSI." />
+        <meta property="twitter:image" content="/favicon.svg" />
+
+        <meta name="theme-color" content="#030303" />
+	</head>
+	<body class="bg-[#030303] text-zinc-100 font-sans antialiased overflow-x-hidden selection:bg-white/20 selection:text-white">
+		<slot />
+	</body>
+</html>
+
+<style is:global>
+	:root {
+		--font-sans: 'Inter', sans-serif;
+		--font-mono: 'JetBrains Mono', monospace;
+	}
+	html {
+		font-family: var(--font-sans);
+	}
+    code, pre {
+        font-family: var(--font-mono);
+    }
+	/* Custom scrollbar */
+	::-webkit-scrollbar {
+		width: 5px;
+		height: 5px;
+	}
+	::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	::-webkit-scrollbar-thumb {
+		background: #3f3f46;
+		border-radius: 20px;
+	}
+	::-webkit-scrollbar-thumb:hover {
+		background: #52525b;
+	}
+    /* Firefox support */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: #3f3f46 transparent;
+    }
+</style>
